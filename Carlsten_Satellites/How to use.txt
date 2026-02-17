@@ -1,0 +1,17 @@
+##### for the Dwarfs Apply quality cuts#####
+
+#Defual for everyone
+dw = Dwarf("DW1311P4051", dist_mod=29.87, logmass=6.98)
+dw.load_data()
+dw.load_asts()
+dw.apply_quality_cuts()   # uses DEFAULT_* thresholds
+
+###overwrite one dwarf permanently
+dw.set_mask_overrides(
+    data={"crowd606_max": 0.20, "crowd814_max": 0.20},
+    ast={"m606_in_max": 50.0}
+)
+dw.apply_quality_cuts()
+
+### overwrite for one call (Temporary) ####
+dw.apply_quality_cuts(data_overrides={"sharp2_606_max": 0.15})
