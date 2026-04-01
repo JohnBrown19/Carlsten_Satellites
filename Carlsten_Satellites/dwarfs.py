@@ -1,3 +1,7 @@
+#imports
+import pandas as pd
+from astropy.io import ascii
+
 class Dwarf(object):
     #Variables assigned here are global for all Dwarf objects
     ast_cols = ['ext','chip','X_in','Y_in','RA_in','Dec_in','X_out','Y_out','RA_out', 
