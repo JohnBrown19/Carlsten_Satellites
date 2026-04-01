@@ -1,0 +1,6 @@
+numpy
+astropy
+matplotlib
+
+[dev]
+pytest>=7.0

@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: Carlsten_Satellites
+Version: 0.1.0
+Summary: Code used to analyze Carlsten Satellites
+Author-email: Jonathon Brown <jonatbro@umich.edu>
+License: CC-BY-NC
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE.txt
+Requires-Dist: numpy
+Requires-Dist: astropy
+Requires-Dist: matplotlib
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Dynamic: license-file
+
+# Carlsten Sources
+
+This library will host a set of notebooks and docuemnts used to reate mock 
+stellar populations of MW-Host satellite galaxies. This work will focus 
+more on looking for evidence (or lack thereof) of star formation. Many 
+updates will be ongoing with building and maintaining this library. 
+
+
