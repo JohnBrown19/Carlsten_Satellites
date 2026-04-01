@@ -1,0 +1,4 @@
+Installation
+============
+
+Download the ource code using a git clone from Github. 
