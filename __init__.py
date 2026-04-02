@@ -1,6 +1,7 @@
-from .imports import *
-from .dwarf import *
-from .dwarf import Dwarf
+
+from .dwarfs import Dwarf
+
+#Modules
 from . import Plotting
 from . import Analysis
 
