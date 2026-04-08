@@ -18,7 +18,7 @@ from astropy.table import Table
 from scipy.interpolate import interp1d
 from itertools import product
 import multiprocess as mp
-
+    
 def extinction_correction(data_apt):
     '''
     This function takes in an array and returns the extinction corrected version of the same array. Extinction correction here utilizes the `dustmaps.sfd` package in orde rot use the Schlegel, Finkbeiner & Davis (1998) maps and the Schlafly & Finkbeiner (2011) calibration. At present, the Av values are hard-coded for HST F606W and F814W.
@@ -116,8 +116,8 @@ def mock_stars_simple_pops(isoch, logage=10.00, met=-2.19174, mass=5e5,  minmass
                        #&(isoch['Zini']==umet[best_met_idx])
                         &(isoch['MH'] == umet[best_met_idx])
                        &(isoch['Mini'] > minmass) 
-                       #&(isoch['label'] < 9)
-                        &(isoch['label']==3)
+                       &(isoch['label'] < 9)
+                        #&(isoch['label']==3)
                       )  
     #set this to our initial mass for our satellite 
     mwt = mass * isoch['int_IMF'][to_use]
@@ -161,8 +161,9 @@ def mock_stars_simple_pops_pd(isoch, logage=10.00, met=-1.0, mass=5e5,  minmass=
     mask = (
         (isoch['logAge'] == ula[best_age_idx]) 
         & (isoch['MH'] == umet[best_met_idx])
-        & (isoch['Mini'] > minmass)
+        & (isoch['Mini'] >= minmass) ### M = 0.1 M_sun (Hydrogen Burning Limit)
         & (isoch['label'] < 9)
+        # & (isoch['label'] == 3)
     )
     to_use = isoch[mask] 
 
