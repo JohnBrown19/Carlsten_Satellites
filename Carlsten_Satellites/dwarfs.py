@@ -14,9 +14,9 @@ class Dwarf(object):
     
     #variables assigned here are for instances (attributes), and may differ with each Dwarf. 
     #you access attributes using object.attribute
-    def __init__(self, name, dist_mod, logmass, Host = None):
+    def __init__(self, name, dmod, logmass, Host = None):
         self.name = str.upper(name)
-        self.dist_mod = float(dist_mod)
+        self.dmod = float(dmod)
         self.logmass = float(logmass)
         self.Host = Host
         self.asts = None
