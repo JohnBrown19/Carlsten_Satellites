@@ -1,4 +1,4 @@
-#This file is meant to house my analysis functions so that I can call them ina  file and not have to repeat lines of code each time for only minor changes
+#This file is meant to house my analysis functions so that I can call them in a file and not have to repeat lines of code each time for only minor changes
 
 #### imports
 #Imports and data Loading
@@ -101,7 +101,8 @@ def mock_stars_simple_pops(isoch, logage=10.00, met=-2.19174, mass=5e5,  minmass
     
     """
 
-    np.random.seed(seed=seed) #set for reproducability
+    #np.random.seed(seed=seed) #set for reproducability
+    rng = np.random.default_rng(seed=seed)
 
     #age
     ula = tb.unique(isoch, keys='logAge')['logAge'] #unique logage
@@ -126,7 +127,8 @@ def mock_stars_simple_pops(isoch, logage=10.00, met=-2.19174, mass=5e5,  minmass
     nstmin, nstmax = np.amin(mwt), np.amax(mwt)
     
     if nstmax - nstmin > 1.0:  #if n < 1, we get no stars
-        nst = (nstmax - nstmin) * np.random.random(size=int(nstmax - nstmin)) + nstmin
+        #nst = (nstmax - nstmin) * np.random.random(size=int(nstmax - nstmin)) + nstmin
+        nst = (nstmax - nstmin) * rng.random(size=int(nstmax - nstmin)) + nstmin
         outtab = tb.Table()
         if len(outputs)>1:
             for i in outputs:
@@ -145,8 +147,9 @@ def mock_stars_simple_pops(isoch, logage=10.00, met=-2.19174, mass=5e5,  minmass
 def mock_stars_simple_pops_pd(isoch, logage=10.00, met=-1.0, mass=5e5,  minmass=0.1, 
                            outputs=['F606Wmag', 'F814Wmag', 'Mass', 'MH'], seed=None):
 
-    np.random.seed(seed=seed)
-
+    #np.random.seed(seed=seed)
+    rng = np.random.default_rng(seed=seed)
+    
     #age (pandas)
     #ula = np.sort(isoch['logAge'].unique())
     ula = np.unique(isoch['logAge'])
@@ -173,7 +176,7 @@ def mock_stars_simple_pops_pd(isoch, logage=10.00, met=-1.0, mass=5e5,  minmass=
 
     #set this to our initial mass for our satellite 
     mwt = mass * to_use['int_IMF'] #.to_numpy()
-    print(type(mwt))
+    #print(type(mwt))
 
     #for the number of stars    
     nstmin, nstmax = np.amin(mwt), np.amax(mwt)
@@ -182,7 +185,8 @@ def mock_stars_simple_pops_pd(isoch, logage=10.00, met=-1.0, mass=5e5,  minmass=
     outtab = pd.DataFrame(columns=outputs)
 
     if nstmax - nstmin > 1.0:
-        nst = (nstmax - nstmin) * np.random.random(size=int(nstmax - nstmin)) + nstmin
+        #nst = (nstmax - nstmin) * np.random.random(size=int(nstmax - nstmin)) + nstmin
+        nst = (nstmax - nstmin) * rng.random(size=int(nstmax - nstmin)) + nstmin
 
     # sort by mwt for np.interp
     order = np.argsort(mwt)
@@ -638,7 +642,7 @@ def apply_ast_probabilistic_interp_df(
     bias_interp_606, scatter_interp_606,
     seed=None
     ):
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(seed=seed)
 
     out = mock_df.copy(deep=True)
 
@@ -673,10 +677,46 @@ def apply_ast_probabilistic_interp_df(
 ### fast version of Apply_AST_probabilistic ###
 
 def apply_ast_probabilistic_fast(mock_df, interp_mag_to_comp,  bias_interp_814, scatter_interp_814, 
-                                 bias_interp_606, scatter_interp_606, seed=None): #interp_mag_to_compwas originally comp814_interp,
+                                 bias_interp_606, scatter_interp_606, seed=None): #interp_mag_to_comp was originally comp814_interp,
+    '''
+    This function uses the bias, scatter, and completion from the Artificial Star Test (AST) to forward-model the observational effects onto our mock stellar population, returning a pandas dataframe of the stars that have newly applied bias and scatter on them to mimic observational spread, limited by the completeness of the F814W filter. 
+
+    Parameters
+    ----------
+    
+    mock_df : Pandas Dataframe
+        This is the resulting dataframe from the ` mock_stars_simple_pops_pd` function that Monte Carlo samples stars from the Integrated Initial mass function (Int_IMF from PARSEC). 
+        
+    interp_mag_to_comp : dict
+        This dictionary contains the F606W and F814W interpolating functions of completion as a function af magnitude. Originally, I was utilizing the completion of both F606W and F814W, but this changed to only using F814W so that we are not preferentially throwing out any blue stars. 
+        
+    bias_interp_814 :  scipy.interpolate._interpolate.interp1d
+        This is the interpolation function for the F814W bias from the `bias_and_scatter` function. 
+    
+    scatter_interp_814 :  scipy.interpolate._interpolate.interp1d
+        This is the interpolation function for the F814W scatter from the `bias_and_scatter` function. 
+    
+    bias_interp_606 :  scipy.interpolate._interpolate.interp1d
+        This is the interpolation function for the F606W bias from the `bias_and_scatter` function. 
+    
+    scatter_interp_606 :  scipy.interpolate._interpolate.interp1d
+        This is the interpolation function for the F606W scatter from the `bias_and_scatter` function. 
+
+    seed : int, optional
+        This is a numerical seed used by np.random.seed for reproducibility. Set default = None
+
+    Returns
+    -------
+    
+    cmd_realistic : astropy.table
+        Pandas dataframe with forward-modeled stellar population in F606W and F814W filters. This output is used in the wrapper function `make_and_eval_mock_pop`. 
+
+    '''
     #set the numpy random seed for reproducability 
-    np.random.seed(seed=seed)
-    #copy the data (apparently weird things can happen if you modify the original dataframe
+    #np.random.seed(seed=seed)
+    rng = np.random.default_rng(seed=seed)
+    
+    #copy the data (apparently weird things can happen if you modify the original dataframe)
     cmd_realistic = mock_df.copy().reset_index(drop=True)
         
     #access only the magnitudes from the pandas dataframe
@@ -689,7 +729,8 @@ def apply_ast_probabilistic_fast(mock_df, interp_mag_to_comp,  bias_interp_814, 
     f606_obs = np.full(n, np.nan)
     
     #detmeriners for keeping values or changing them
-    u814 = np.random.uniform(0., 1., size=n) #uniform draw
+    #u814 = np.random.uniform(0., 1., size=n) #uniform draw
+    u814 = rng.uniform(0., 1., size=n) #uniform draw
     c814 = interp_mag_to_comp['F814W'](m814_true) #814 completeness for each star
 
     #generate all the bias, scatter values; using the interpolating functions returns a numpy array
@@ -702,8 +743,10 @@ def apply_ast_probabilistic_fast(mock_df, interp_mag_to_comp,  bias_interp_814, 
     #need element-wise comparison for the scatter
     min_814_scatter = np.maximum(s814, 1e-8)
     min_606_scatter = np.maximum (s606, 1.e-8)
-    noise814 = np.random.normal(loc=b814, scale=min_814_scatter)
-    noise606 = np.random.normal(loc=b606, scale=min_606_scatter)
+    #noise814 = np.random.normal(loc=b814, scale=min_814_scatter)
+    #noise606 = np.random.normal(loc=b606, scale=min_606_scatter)
+    noise814 = rng.normal(loc=b814, scale=min_814_scatter)
+    noise606 = rng.normal(loc=b606, scale=min_606_scatter)
 
     # Observed magnitudes = true mag + bias & scatter draw
     m814_obs = m814_true + noise814
@@ -734,79 +777,34 @@ def make_and_eval_mock_pop(isoch, fixed_age, met, dmod=29.74, log_mass=6.98, int
     create and evaluate my mock population for a given age, metallicity
     """
     #fixed_age, met = params
-    print(f"Running for logAge = {fixed_age}, MH = {met}")
-    seed = 3
-    try:
-        if seed is not None:
-            seed_iter = int(seed + round(fixed_age*1000) + round((met+10)*10000)) #generate a seed that is reporducable
-        else:
-            seed_iter = None
-        
-        # 1. Generate mock population
-        outputs = ['F606Wmag', 'F814Wmag'] #can add more from isoch_table columns
-        
-        # base mass scaled by weight
-        base_mass = 10**log_mass * (1./0.55) * weight
-
-        # if smooth=True, increase sampling mass by 10**2 in order to smooth out the CDF
-        mass_used = base_mass * (smooth_factor if smooth else 1.0)
-        
-        mock_df = mock_stars_simple_pops_pd(
-            isoch, logage=fixed_age, met=met,
-            mass=mass_used, minmass=0.55, outputs=outputs, seed=seed_iter
-            )
-        
-        #3 Apply distance modulus
-        dist_mod  = 29.87
-        mock_pop_dmod = apply_dist_mod(mock_df, dist_mod)
-        
-        #mock_obs = apply_ast_probabilistic_interp(mock_pop_dmod, 
-        #                             interp_mag_to_comp['F814W'], bias_interp_814, scatter_interp_814, 
-        #                             bias_interp_606, scatter_interp_606, seed=3)
-
-        mock_obs = apply_ast_probabilistic_fast(mock_pop_dmod, 
-                                     interp_mag_to_comp, bias_interp_814, scatter_interp_814, 
-                                     bias_interp_606, scatter_interp_606, seed=seed_iter)
-        # 5. Compute observed color (drop unrecovered)
-        mock_color_df = (mock_obs['F606W_obs'] - mock_obs['F814W_obs']).dropna()
-
-        return mock_color_df
-
-    except Exception as e:
-        print(f"Error at age={fixed_age}, met={met}: {e}")
-        # return empty series to match expected return type
-        return pd.Series(dtype=float)
-
-#def make_and_eval_mock_pop(fixed_age, met): #original function: (params): ###returns the dataframe, so I can manipulate it directly
-#def make_and_eval_mock_pop2(isoch, fixed_age, met, dmod = 29.74, log_mass = 6.98, smooth=False, weight = 1.0): 
-
-def make_and_eval_mock_pop2(isoch, fixed_age, met, dmod=29.74, log_mass=6.98, interp_mag_to_comp=None, bias_interp_814=None,
-    scatter_interp_814=None, bias_interp_606=None, scatter_interp_606=None, smooth=False, smooth_factor=1.e1, weight=1.0, seed=None):
-
-    """
-    create and evaluate my mock population for a given age, metallicity. Reutrns a pandas dataframe
-    """
-    #fixed_age, met = params
-    print(f"Running for logAge = {fixed_age}, MH = {met}")
+    #print(f"Running for logAge = {fixed_age}, MH = {met}")
     #seed = 3
     try:
+    #     if seed is not None:
+    #         seed_iter = int(seed + round(fixed_age*1000) + round((met+10)*10000)) #generate a seed that is reporducable
+    #         print(f"seed_iter = {seed_iter}")
+    #     else:
+    #         seed_iter = None
         if seed is not None:
-            seed_iter = int(seed + round(fixed_age*1000) + round((met+10)*10000)) #generate a seed that is reporducable
+            base_seed = int(seed + round(fixed_age*1000) + round((met+10)*10000))
+            seed_pop = base_seed
+            seed_ast = base_seed + 1
         else:
-            seed_iter = None
+            seed_pop = None
+            seed_ast = None
         
         # 1. Generate mock population
         outputs = ['F606Wmag', 'F814Wmag'] #can add more from isoch_table columns
         
         # base mass scaled by weight
-        base_mass = 10**log_mass * (1./0.55) * weight
+        base_mass = (10**log_mass) * (1./0.55) * weight
 
         # if smooth=True, increase sampling mass by 10**2 in order to smooth out the CDF
         mass_used = base_mass * (smooth_factor if smooth else 1.0)
         
         mock_df = mock_stars_simple_pops_pd(
             isoch, logage=fixed_age, met=met,
-            mass=mass_used, minmass=0.55, outputs=outputs, seed=seed_iter
+            mass=mass_used, minmass=0.55, outputs=outputs, seed=seed_pop
             )
         
         #3 Apply distance modulus
@@ -819,7 +817,68 @@ def make_and_eval_mock_pop2(isoch, fixed_age, met, dmod=29.74, log_mass=6.98, in
 
         mock_obs = apply_ast_probabilistic_fast(mock_pop_dmod, 
                                      interp_mag_to_comp, bias_interp_814, scatter_interp_814, 
-                                     bias_interp_606, scatter_interp_606, seed=seed_iter)
+                                     bias_interp_606, scatter_interp_606, seed=seed_ast)
+        # 5. Compute observed color (drop unrecovered)
+        mock_color_df = (mock_obs['F606W_obs'] - mock_obs['F814W_obs']).dropna()
+
+        return mock_color_df
+
+    except Exception as e:
+        print(f"Error at age={fixed_age}, met={met}: {e}")
+        # return empty series to match expected return type
+        return pd.Series(dtype=float)
+
+#def make_and_eval_mock_pop(fixed_age, met): #original function: (params): ###returns the dataframe, so I can manipulate it directly
+#def make_and_eval_mock_pop2(isoch, fixed_age, met, dmod = 29.74, log_mass = 6.98, smooth=False, weight = 1.0): 
+    
+def make_and_eval_mock_pop2(isoch, fixed_age, met, dmod=29.74, log_mass=6.98, interp_mag_to_comp=None, bias_interp_814=None,
+    scatter_interp_814=None, bias_interp_606=None, scatter_interp_606=None, smooth=False, smooth_factor=1.e1, weight=1.0, seed=None):
+
+    """
+    create and evaluate my mock population for a given age, metallicity. Reutrns a pandas dataframe
+    """
+    #fixed_age, met = params
+    #print(f"Running for logAge = {fixed_age}, MH = {met}")
+    #seed = 3
+    try:
+        # if seed is not None:
+        #     seed_iter = int(seed + round(fixed_age*1000) + round((met+10)*10000)) #generate a seed that is reporducable
+        #     print(f"seed_iter = {seed_iter}")
+        # else:
+        #     seed_iter = None
+        if seed is not None:
+            base_seed = int(seed + round(fixed_age*1000) + round((met+10)*10000))
+            seed_pop = base_seed
+            seed_ast = base_seed + 1
+        else:
+            seed_pop = None
+            seed_ast = None
+        
+        # 1. Generate mock population
+        outputs = ['F606Wmag', 'F814Wmag'] #can add more from isoch_table columns
+        
+        # base mass scaled by weight
+        base_mass = (10**log_mass) * (1./0.55) * weight #(1/0.55) is the replacement factor for inital mass vs current mass)
+
+        # if smooth=True, increase sampling mass by 10**2 in order to smooth out the CDF
+        mass_used = base_mass * (smooth_factor if smooth else 1.0)
+        
+        mock_df = mock_stars_simple_pops_pd(
+            isoch, logage=fixed_age, met=met,
+            mass=mass_used, minmass=0.55, outputs=outputs, seed=seed_pop
+            )
+        
+        #3 Apply distance modulus
+        dist_mod  = dmod
+        mock_pop_dmod = apply_dist_mod(mock_df, dist_mod)
+        
+        #mock_obs = apply_ast_probabilistic_interp(mock_pop_dmod, 
+        #                             interp_mag_to_comp['F814W'], bias_interp_814, scatter_interp_814, 
+        #                             bias_interp_606, scatter_interp_606, seed=3)
+
+        mock_obs = apply_ast_probabilistic_fast(mock_pop_dmod, 
+                                     interp_mag_to_comp, bias_interp_814, scatter_interp_814, 
+                                     bias_interp_606, scatter_interp_606, seed=seed_ast)
         #previously had the seed=3 here
         
 
@@ -944,7 +1003,8 @@ def color_spread_weighting(
     seed=None
 ):
     start_time = time.time()
-
+    
+    print(f"Running for logAge = {fixed_age}, MH = {mets[0]}")
     blue_color = make_and_eval_mock_pop(
         isoch, fixed_age, mets[0],
         dmod=dmod,
@@ -959,7 +1019,8 @@ def color_spread_weighting(
         weight=1.0,
         seed=seed
     )
-
+    
+    print(f"Running for logAge = {fixed_age}, MH = {mets[1]}")
     red_color = make_and_eval_mock_pop(
         isoch, fixed_age, mets[1],
         dmod=dmod,
@@ -984,8 +1045,20 @@ def color_spread_weighting(
     red_stars  = red_stars[np.isfinite(red_stars)]
     data_stars = data_stars[np.isfinite(data_stars)]
 
-    if len(blue_stars) < 2 or len(red_stars) < 2 or len(data_stars) < 2:
-        raise ValueError("One of your samples has <2 finite values. Cannot build ECDFs reliably.")
+    print("len blue:", len(blue_stars))
+    print("len red :", len(red_stars))
+
+    #update. Before, this wasn't breaking becasue I had accidently set the seed in a way that it wouldn't break. 
+    # if len(blue_stars) < 2 or len(red_stars) < 2 or len(data_stars) < 2:
+    #     raise ValueError("One of your samples has <2 finite values. Cannot build ECDFs reliably.")
+
+    
+    if len(data_stars) < 2:
+        raise ValueError("data_color has <2 finite values. Cannot build ECDF reliably.")
+
+    # allow one endpoint to be tiny/empty; only fail if both are unusable
+    if len(blue_stars) < 2 and len(red_stars) < 2:
+        raise ValueError("Both model samples have <2 finite values. Cannot compare to data reliably.")
 
     x_grid = data_stars
 
