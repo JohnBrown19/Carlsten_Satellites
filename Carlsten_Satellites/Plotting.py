@@ -4,12 +4,120 @@
 import matplotlib.pyplot as plt 
 from matplotlib.path import Path
 from matplotlib import patches
+import pandas as pd
 import numpy as np
 from scipy import stats
 from scipy.interpolate import interp1d
 import seaborn as sns
 import matplotlib.ticker as ticker
 
+def Find_RGB(data_apt_clean, dwarf, isoch, fixed_age = 9.9, mets = [-2.19174, -0.5], box_coords=None, output=False, 
+             ymin = 22.0, ymax=28.0, xmin = -1.0, xmax = 2.5, markersize=10):
+    '''
+    This is a variable function used to find the quadrilateral shape of potential RGB stars. It also returns the 
+    f606_rgb, f814_rgb, ra_rgb, and dec_rgb arrays for data manipulation and plotting to compare to 
+    our mock populations later
+
+    Parameters
+    ----------
+    
+    data_apt_clean : ndarray
+    This is the input dataframe or astropy table that is generated after extinction correction
+
+    dwarf :  object(Dwarf)
+    This is the dwarf object that our data is based on. 
+    This is getting in mostly so I can name the plot appropriately
+
+    box_coords : numpy array of tuple coordinates, optional
+    This paraemter takes in a tuple of points [(ra1, dec1), (ra2, dec2), etc.] that is used to isolate the 
+    RGB overdensity.
+
+    output : bool, optional
+    This is a boolean flag that doesn't return the rgb arrays (False, no returns; True, return f606_rgb and f814_rgb)
+    
+    Returns
+    -------
+    f606_rgb : ndarray
+    This is the F606W magnitude of our RGB stars. Will get used later for our mock population comparison
+    
+    f814_rgb : ndarray
+    This is the F814W magnitude of our RGB stars. Will get used later for our mock population comparison
+    
+    ra_rgb : ndarray
+    This is used for the plot to ensure that the correctly-selected region is used for TRGB selection. 
+
+    dec_rgb : ndarray
+    This is used for the plot to ensure that the correctly-selected region is used for TRGB selection. 
+    
+    Notes
+    -----
+    I considered putting a user input argument so that I could more iteratively adjust the TRGB box coords, but I 
+    didn't look into it at the moment. 
+    
+    '''
+
+    #create ra, dec object to filter by
+    #ra = data_apt_clean['ra']; dec = data_apt_clean['dec']
+    col = data_apt_clean['acs_f606w_vega'] - data_apt_clean['acs_f814w_vega']
+    mag814 = data_apt_clean['acs_f814w_vega']
+        
+    #real CMD
+    plt.scatter(data_apt_clean['acs_f606w_vega'] - data_apt_clean['acs_f814w_vega'], data_apt_clean['acs_f814w_vega'], 
+                c='blue', label='Raw CMD', s=markersize, alpha=0.7)
+    #isochrone
+    cmdfilt = (isoch['logAge'] == fixed_age) & (isoch['MH'] == mets[0]) & (isoch['label'] < 9)
+    w = isoch[cmdfilt]
+    cmdfilt2 = (isoch['logAge'] == fixed_age) & (isoch['MH'] == mets[1]) & (isoch['label'] < 9)
+    w2 = isoch[cmdfilt2]
+
+    plt.scatter(w['F606Wmag'] - w['F814Wmag'], w['F814Wmag'] + dwarf.dmod, color='k', alpha = 1.0, 
+            label = f'logage = {fixed_age}, [M/H] = {mets[0]}', s=markersize)
+    plt.scatter(w2['F606Wmag'] - w2['F814Wmag'], w2['F814Wmag'] + dwarf.dmod, color='purple', alpha = 1.0, 
+            label = f'logage = {fixed_age}, [M/H] = {mets[1]}', s=markersize)
+    #create RGB varaibles that maybe saved later
+    f606_rgb = None; f814_rgb = None;
+    ra_rgb = None;dec_rgb = None
+    
+    #Finding the RGB stars from my box
+    if box_coords is not None:
+        #create the points around the 
+        RGB_box = Path(box_coords)
+        plt.gca().add_patch(patches.PathPatch(RGB_box, fc='none', ec='red', lw=1.4, linestyle = '-.', zorder=1,
+                                alpha=0.9))
+        #filter the region
+        in_CMD_box = (RGB_box.contains_points(np.vstack([col, mag814]).T) )
+
+        #unfiltered version
+        pts_sources_rgb = data_apt_clean[(in_CMD_box)]
+
+        #fitler arrays for Ra, Dec, F606, F814
+        f606_rgb = pts_sources_rgb['acs_f606w_vega']
+        f814_rgb = pts_sources_rgb['acs_f814w_vega']
+        ra_rgb = pts_sources_rgb['ra']
+        dec_rgb = pts_sources_rgb['dec']
+
+        #Photometry and RGB masked plots
+        plt.scatter(f606_rgb - f814_rgb, f814_rgb, alpha=0.5, color = 'red', s = markersize, label = 'Isolated RGB')
+
+    #plot
+    plt.ylim(ymin, ymax)
+    plt.xlim(xmin, xmax)
+    plt.gca().invert_yaxis()
+    plt.xlabel('F606W - F814W')
+    plt.ylabel('F814W')
+    plt.title('CMD for ' + dwarf.name)
+    plt.legend(loc='best')
+    plt.show()
+
+    if output is True:
+        rgb = {
+            'acs_f606w_vega' : f606_rgb,
+            'acs_f814w_vega' : f814_rgb,
+            'ra' : ra_rgb,
+            'dec' : dec_rgb,
+        }
+        rgb_pd = pd.DataFrame(rgb)
+        return rgb_pd
 
 def Find_TRGB(data_apt_clean, dwarf, box_coords=None, output=False):
     '''
@@ -76,11 +184,8 @@ def Find_TRGB(data_apt_clean, dwarf, box_coords=None, output=False):
         dec_rgb = pts_sources_rgb['dec']
 
         #Photometry and RGB masked plots
-        
         plt.scatter(ra_rgb, dec_rgb, alpha=0.9, color = 'red', s = 6, label = 'Isolated RGB')
         
-
-
     #plots
     #plt.scatter(data_apt['ra'], data_apt['dec'], alpha=0.5, label = 'Raw data')
     plt.scatter(data_apt_clean['ra'], data_apt_clean['dec'], color='black', s=6, alpha=0.5, label = 'Photometry masked')
