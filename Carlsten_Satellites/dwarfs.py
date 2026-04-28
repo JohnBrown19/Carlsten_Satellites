@@ -21,6 +21,7 @@ class Dwarf(object):
         self.Host = Host
         self.asts = None
         self.data = None
+        self.data_masked = None
         self.data_clean = None
         self.ast_clean = None
         self._data_mask = None #(optional, for debugging)
@@ -40,6 +41,13 @@ class Dwarf(object):
                                 + ".phot_full.hdf5", 
                                 key='data')
         print(f"Data for {self.name} loaded sucessfully")
+
+    def load_data_masked(self):
+        self.data = pd.read_hdf("./17797/fake-results2/17797_" + self.name 
+                                + "/proc_default_deepCR/17797_" + self.name 
+                                + ".phot_full_masked.hdf5", 
+                                key='data')
+        print(f"Masked ata for {self.name} loaded sucessfully")
         
     def data_type(self):
         self.data_type = type(self.data)

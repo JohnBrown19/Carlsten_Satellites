@@ -1214,8 +1214,41 @@ def build_final_weighted_sample(
     final_sample = np.concatenate(sample_parts)
     return np.sort(final_sample)
 
+#From Jose MArcos Arias with soem amendmenets to work with my code syntax and definitions
+
+def get_separation(zeropoint, coordinates, unit='arcmins'):
+    
+    '''
+    Inputs: 
+        zeropoint (astropy.SkyCoord): reference point from which you want to calc separation
+        coordinates (astropy.SkyCoords): list of coordinates you want to find separations for
+        in_kpc: if you want separations in kpc, make this True. Else, get result in degrees.
+    Returns: Array of transformed dec, ra separations in degrees from zeropoint coordinate
+    '''
+    import astropy.units as u
+    
+    sep = zeropoint.separation(coordinates)
+    ang = zeropoint.position_angle(coordinates)
+    # if unit=='kpc':
+    #     delta_dec = sep.degnp.cos(ang.radian)*dgal(np.pi/180) # in kpc currently
+    #     delta_ra = sep.degnp.sin(1.0ang.radian)dgal(np.pi/180)
+    if unit=='degrees':
+        delta_dec = ((sep.deg * np.cos(ang.radian)) * u.degree).value # in degrees
+        delta_ra = ((sep.deg * np.sin(1.0*ang.radian)) * u.degree).value
+    if unit=='arcmins':
+        delta_dec = (((sep.deg * np.cos(ang.radian)) * u.degree).to(u.arcmin)).value # in arcmin
+        delta_ra = (((sep.deg * np.sin(1.0*ang.radian)) * u.degree).to(u.arcmin)).value
+    if unit == 'arcsec':
+        delta_dec = (((sep.deg * np.cos(ang.radian)) * u.degree).to(u.arcsec)).value # in arcsec
+        delta_ra = (((sep.deg * np.sin(1.0*ang.radian)) * u.degree).to(u.arcsec)).value               
+    return delta_dec, delta_ra
+
+#### End of code from #From Jose MArcos Arias with soem amendmenets to work with my code syntax and definitions ####
+
+
 
 ###### Running KDE  #########
+#####Based on Code I used for Completeing Umich Astro 406 course #####
 
 # #import iqr for the inner quartile range
 # from scipy.stats import iqr
@@ -1244,6 +1277,7 @@ def build_final_weighted_sample(
 #     return (1 / len(data)) * density
 
 ##### return the Epanechnikov kernel ########
+
 # #set the spacing intervals
 # spacing_color = np.linspace(-0.5, 3.0, 2000)
 
