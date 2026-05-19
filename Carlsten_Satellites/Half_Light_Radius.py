@@ -67,7 +67,8 @@ ndim = {'sersic': 7, 'exponential': 6}.get(profile_x, None)
 labels_text   = common_labels_text + label_extras[profile_x]['labels_text']
 labels        = common_labels + label_extras[profile_x]['labels']
 
-
+def find_angular_seperation():
+    pass
 
 def get_separation(zeropoint, coordinates, unit='arcmins'):
     
@@ -478,7 +479,7 @@ def peak_interval(data, alpha=_alpha, npoints=_npoints, clip =5.0 ):
     hi = ends[select][min_idx]
     return interval(peak,lo,hi)
 
-def estimate_position_angle(pa, npoints=_npoints, clip=5.0,alpha=0.32):
+def estimate_position_angle(pa, npoints=_npoints, clip=5.0, alpha=0.32):
     """ Estimate the position angle from the posterior dealing
     with periodicity.
     pa = flat samples after burn in (must be in degrees)
@@ -653,14 +654,24 @@ def elliptical_radius(x, y, bstval, profile='sersic'):
 
     PA_rad = np.radians(PA) ## input PA must be in cartesian (as given by mcmc posterior)
     
+    #center the coordinates on the candidate's coordinates
     x_off = (x - x0)
     y_off = (y - y0)
-        
+
+    #use the rotation matrix to transform from non-rotated coords into coords that align with the satellite
     x_r = (x_off * np.cos(PA_rad) - y_off * np.sin(PA_rad) ) / (1.0 - e)
     y_r = (x_off * np.sin(PA_rad) + y_off * np.cos(PA_rad) )
+    
+    # # elliptical radius, with q = 1 - e
+    # q = 1.0 - e
+    # r_ell = np.sqrt(x_r**2 + (y_r / q)**2)
+
+    # return r_ell
         
     r = np.sqrt(x_r**2 + y_r**2)
+    
     return r
+    
 #######----#######
 
 def Select_stars_inside_ellipse(deltara_stars, deltadec_stars, array, bstval, ufd_coords, factor=2.0, 
@@ -715,31 +726,40 @@ def Select_stars_inside_ellipse(deltara_stars, deltadec_stars, array, bstval, uf
     x_rot = cos_angle * x_rel + sin_angle * y_rel
     y_rot = -sin_angle * x_rel + cos_angle * y_rel
 
-    if method=='ellipse':
-        # Check if the points are within the ellipse
-        inside = ((x_rot**2 / a**2) + (y_rot**2 / b**2)) <= 1.0
-    elif method=='elliptical radius': 
-        inside = np.where((elliptical_rad_pts<=(factor*rh)))
+    # if method=='ellipse':
+    #     # Check if the points are within the ellipse
+    #     inside = ((x_rot**2 / a**2) + (y_rot**2 / b**2)) <= 1.0
+        
+    # elif method=='elliptical radius': 
+    #     inside = np.where((elliptical_rad_pts<=(factor*rh)))
 
-    # Select points inside the ellipse
-    ufd_array = array[inside]
-
-    # elif method == 'elliptical radius': 
-    #     inside = (elliptical_rad_pts <= (factor * rh))
-
-    # # Select points inside the ellipse
+    # # # Select points inside the ellipse
+    # # ufd_array = array[inside]
+    
     # if isinstance(array, pd.DataFrame):
     #     ufd_array = array.loc[inside].copy()
     # else:
     #     ufd_array = array[inside]
-    
+
+    if method == 'ellipse':
+        inside = ((x_rot**2 / a**2) + (y_rot**2 / b**2)) <= 1.0
+
+    elif method == 'elliptical radius': 
+        inside = elliptical_rad_pts <= (factor * rh)
+
+    else:
+        raise ValueError("method must be 'ellipse' or 'elliptical radius'")
+
+    if isinstance(array, pd.DataFrame):
+        ufd_array = array.loc[inside].copy()
+    else:
+        ufd_array = array[inside]
+
     ### Candidate Coordinates 
     coords_rh_pts = astropy.coordinates.SkyCoord(ufd_array[coords_cols[0]], ufd_array[coords_cols[1]],
                                                  unit=(u.deg, u.deg), frame='icrs')
     deltadec, deltara = get_separation(ufd_coords, coords_rh_pts)
     return deltadec, deltara, ufd_array
-
-
 
 #######----#######
 

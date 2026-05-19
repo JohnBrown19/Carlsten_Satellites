@@ -8,6 +8,7 @@ import pandas as pd
 import ezpadova #isochrones
 import matplotlib.pyplot as plt
 from scipy import stats
+from scipy.stats import norm, poisson
 import time
 import astropy
 from astropy.table import Table
@@ -264,7 +265,7 @@ def clean_asts(ast_apt):
     -------
     
     ast_apt : ndarray
-    This is the resulting ndarray after removing bad bad pixels
+    This is the resulting ndarray after removing bad pixels
 
     '''
     
@@ -559,23 +560,26 @@ def plot_ast_completeness(completeness_tbl, dwarf):
     This is meant to pull in the name of the target system instead of hard docing it. 
     '''
     
-    plt.figure(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=(10,5)) #plt.figure(figsize=(10, 5))
 
-    plt.plot(completeness_tbl['mag_bin_center'], completeness_tbl['completeness_606'],
-             label='F606W', color='blue')
-    plt.plot(completeness_tbl['mag_bin_center'], completeness_tbl['completeness_814'],
-             label='F814W', color='red')
+    ax.plot(completeness_tbl['mag_bin_center'], completeness_tbl['completeness_606'],
+             label='F606W', color='blue', zorder=3)
+    ax.plot(completeness_tbl['mag_bin_center'], completeness_tbl['completeness_814'],
+             label='F814W', color='red', zorder=3)
 
     #plt.axhline(0.5, color='gray', linestyle='--', lw=1, label='80% completion')
     #plt.axhline(0.8, color='gray', linestyle=':', lw=1, label='50% completion')
 
-    plt.xlabel("Input Magnitude")
-    plt.ylabel("Completeness")
-    plt.title(dwarf.name + " Completeness")
-    plt.ylim(0, 1.2)
-    plt.legend(fontsize=12)
-    plt.grid(True)
-    plt.show()
+    ax.set_xlabel("Input Magnitude")
+    ax.set_ylabel("Completeness")
+    ax.set_title(dwarf.name + " Completeness")
+    ax.set_ylim(0, 1.2)
+    ax.legend(fontsize=12)
+
+    ax.set_axisbelow(True)
+    ax.grid(True, which="major", linestyle="--", linewidth=0.7, alpha=0.7, zorder=0)
+    #plt.show()
+    return fig
 
 ### define the bias and scatter functions ####
 
@@ -984,7 +988,7 @@ def ecdf_on_grid(sorted_sample, x_grid):
     counts = np.searchsorted(sorted_sample, x_grid, side="right")
     return counts / n
 
-### Color spread ###
+## Color spread ###
 
 def color_spread_weighting(
     isoch,
@@ -1141,111 +1145,193 @@ def color_spread_weighting(
 
     return w_best
 
-def build_final_weighted_sample(
+def color_spread_weighting(
     isoch,
-    fixed_age,
-    mets,
-    w_best,
-    dmod,
-    log_mass,
+    data_color,
     interp_mag_to_comp,
     bias_interp_814,
     scatter_interp_814,
     bias_interp_606,
     scatter_interp_606,
+    dmod,
+    log_mass,
+    fixed_age=9.9,
+    mets=[-2.19174, -0.5],
     smooth=False,
     smooth_factor=1.e1,
-    seed=None
+    seed=None,
+    make_plots=True
 ):
-    blue_weight = w_best
-    red_weight  = 1.0 - w_best
+    start_time = time.time()
+    
+    print(f"Running for logAge = {fixed_age}, MH = {mets[0]}")
+    blue_color = make_and_eval_mock_pop(
+        isoch, fixed_age, mets[0],
+        dmod=dmod,
+        log_mass=log_mass,
+        interp_mag_to_comp=interp_mag_to_comp,
+        bias_interp_814=bias_interp_814,
+        scatter_interp_814=scatter_interp_814,
+        bias_interp_606=bias_interp_606,
+        scatter_interp_606=scatter_interp_606,
+        smooth=smooth,
+        smooth_factor=smooth_factor,
+        weight=1.0,
+        seed=seed
+    )
+    
+    print(f"Running for logAge = {fixed_age}, MH = {mets[1]}")
+    red_color = make_and_eval_mock_pop(
+        isoch, fixed_age, mets[1],
+        dmod=dmod,
+        log_mass=log_mass,
+        interp_mag_to_comp=interp_mag_to_comp,
+        bias_interp_814=bias_interp_814,
+        scatter_interp_814=scatter_interp_814,
+        bias_interp_606=bias_interp_606,
+        scatter_interp_606=scatter_interp_606,
+        smooth=smooth,
+        smooth_factor=smooth_factor,
+        weight=1.0,
+        seed=seed
+    )
 
-    sample_parts = []
+    blue_stars = np.sort(np.asarray(blue_color))
+    red_stars  = np.sort(np.asarray(red_color))
+    data_stars = np.sort(np.asarray(data_color))
 
-    # build blue only if needed
-    if blue_weight > 0.0:
-        blue_sample = make_and_eval_mock_pop(
-            isoch, fixed_age, mets[0],
-            dmod=dmod,
-            log_mass=log_mass,
-            interp_mag_to_comp=interp_mag_to_comp,
-            bias_interp_814=bias_interp_814,
-            scatter_interp_814=scatter_interp_814,
-            bias_interp_606=bias_interp_606,
-            scatter_interp_606=scatter_interp_606,
-            smooth=smooth,
-            smooth_factor=smooth_factor,
-            weight=blue_weight,
-            seed=seed
+    blue_stars = blue_stars[np.isfinite(blue_stars)]
+    red_stars  = red_stars[np.isfinite(red_stars)]
+    data_stars = data_stars[np.isfinite(data_stars)]
+
+    print("len blue:", len(blue_stars))
+    print("len red :", len(red_stars))
+
+    if len(data_stars) < 2:
+        raise ValueError("data_color has <2 finite values. Cannot build ECDF reliably.")
+
+    if len(blue_stars) < 2 and len(red_stars) < 2:
+        raise ValueError("Both model samples have <2 finite values. Cannot compare to data reliably.")
+
+    x_grid = data_stars
+
+    F_blue = ecdf_on_grid(blue_stars, x_grid)
+    F_red  = ecdf_on_grid(red_stars, x_grid)
+    F_data_on_grid = ecdf_on_grid(data_stars, x_grid)
+
+    weights = np.arange(0.0, 1.01, 0.01)
+    w_list, D_list, p_list = [], [], []
+
+    for w in weights:
+        F_mix = w * F_blue + (1.0 - w) * F_red
+
+        Fmix_callable = interp1d(
+            x_grid,
+            F_mix,
+            bounds_error=False,
+            fill_value=(0.0, 1.0),
+            assume_sorted=True
         )
 
-        blue_sample = np.asarray(blue_sample)
-        blue_sample = blue_sample[np.isfinite(blue_sample)]
-
-        if len(blue_sample) > 0:
-            sample_parts.append(blue_sample)
-
-    # build red only if needed
-    if red_weight > 0.0:
-        red_sample = make_and_eval_mock_pop(
-            isoch, fixed_age, mets[1],
-            dmod=dmod,
-            log_mass=log_mass,
-            interp_mag_to_comp=interp_mag_to_comp,
-            bias_interp_814=bias_interp_814,
-            scatter_interp_814=scatter_interp_814,
-            bias_interp_606=bias_interp_606,
-            scatter_interp_606=scatter_interp_606,
-            smooth=smooth,
-            smooth_factor=smooth_factor,
-            weight=red_weight,
-            seed=seed
+        D, p = stats.kstest(
+            data_stars,
+            Fmix_callable,
+            alternative="two-sided",
+            mode="asymp"
         )
 
-        red_sample = np.asarray(red_sample)
-        red_sample = red_sample[np.isfinite(red_sample)]
+        w_list.append(w)
+        D_list.append(D)
+        p_list.append(p)
 
-        if len(red_sample) > 0:
-            sample_parts.append(red_sample)
+    res = pd.DataFrame({
+        "weights": w_list,
+        "KS_D_1samp": D_list,
+        "KS_p_1samp": p_list
+    })
 
-    if len(sample_parts) == 0:
-        return np.array([])
+    best_idx = int(np.argmin(res["KS_D_1samp"].values))
+    w_best = float(res.loc[best_idx, "weights"])
+    D_best = float(res.loc[best_idx, "KS_D_1samp"])
+    p_best = float(res.loc[best_idx, "KS_p_1samp"])
 
-    final_sample = np.concatenate(sample_parts)
-    return np.sort(final_sample)
+    print("Best weight (w_best):", w_best)
+    print("Best 1-sample KS D:", D_best)
+    print("1-sample KS p-value at w_best:", p_best)
 
-#From Jose MArcos Arias with soem amendmenets to work with my code syntax and definitions
+    F_mix_best = w_best * F_blue + (1.0 - w_best) * F_red
 
-def get_separation(zeropoint, coordinates, unit='arcmins'):
+    figs = {}
+
+    if make_plots:
+        fig_D, ax_D = plt.subplots(figsize=(7, 4))
+        ax_D.plot(res["weights"], res["KS_D_1samp"], lw=2)
+        ax_D.set(
+            xlabel="w (weight of low-metallicity stars)",
+            ylabel="1-sample KS D",
+            title="1-sample KS distance vs mixture weight"
+        )
+        ax_D.grid(alpha=0.25)
+        ax_D.invert_xaxis()
+        fig_D.tight_layout()
+        figs["ks_distance"] = fig_D
+
+        fig_p, ax_p = plt.subplots(figsize=(7, 4))
+        ax_p.plot(res["weights"], res["KS_p_1samp"], lw=2)
+        ax_p.set(
+            xlabel="w (fraction of BLUE component)",
+            ylabel="log 1-sample KS p-value",
+            title="1-sample KS p-value vs mixture weight"
+        )
+        ax_p.set_yscale("log")
+        ax_p.invert_xaxis()
+        ax_p.grid(alpha=0.25)
+        fig_p.tight_layout()
+        figs["ks_pvalue"] = fig_p
+
+        fig_cdf, ax_cdf = plt.subplots(figsize=(8, 6))
+        ax_cdf.plot(x_grid, F_data_on_grid, "k-", lw=2.5, label="Data ECDF")
+        ax_cdf.plot(x_grid, F_mix_best, "r-", lw=2.5, label=f"Best mixture CDF (w={w_best:.2f})")
+        ax_cdf.plot(x_grid, F_blue, "--", lw=2, label="Blue CDF")
+        ax_cdf.plot(x_grid, F_red, "--", lw=2, label="Red CDF")
+        ax_cdf.set(
+            xlabel="Color (F606W - F814W)",
+            ylabel="CDF",
+            title="Best-fit mixture CDF vs data"
+        )
+        textplacement = np.min([F_data_on_grid, F_mix_best, F_blue, F_red])
+        ax_cdf.annotate(f'Distance = {D_best:.3f}', (textplacement -.2, 0.8), fontsize=12)
+        ax_cdf.annotate(f'p-value = {p_best:.3e}', (textplacement -.2, 0.7), fontsize=12)
+        ax_cdf.legend()
+        ax_cdf.grid(alpha=0.25)
+        fig_cdf.tight_layout()
+        figs["best_cdf"] = fig_cdf
+
+    print('execution time = %.3f seconds' % (time.time() - start_time))
+    print('execution time = %.3f minutes' % ((time.time() - start_time) / 60.0))
+
+    return {
+        "w_best": w_best,
+        "D_best": D_best,
+        "p_best": p_best,
+        "results": res,
+        "figures": figs,
+        "blue_color": blue_stars,
+        "red_color": red_stars,
+        "data_color": data_stars,
+    }
+
+def Poisson_stats(expected_val, target_val):
+    p_val = poisson.sf(expected_val, target_val)
+    print(f"Probability of getting {target_val} stars from the expected background of {expected_val} stars using Poisson statistics = {p_val:.4e}")
+    return p_val
+
+def pc_to_arcmin(radius_pc, distance_mpc):
+    distance_pc = distance_mpc * 1e6
+    theta_rad = radius_pc / distance_pc
+    theta_arcmin = np.degrees(theta_rad) * 60
+    return theta_arcmin
     
-    '''
-    Inputs: 
-        zeropoint (astropy.SkyCoord): reference point from which you want to calc separation
-        coordinates (astropy.SkyCoords): list of coordinates you want to find separations for
-        in_kpc: if you want separations in kpc, make this True. Else, get result in degrees.
-    Returns: Array of transformed dec, ra separations in degrees from zeropoint coordinate
-    '''
-    import astropy.units as u
-    
-    sep = zeropoint.separation(coordinates)
-    ang = zeropoint.position_angle(coordinates)
-    # if unit=='kpc':
-    #     delta_dec = sep.degnp.cos(ang.radian)*dgal(np.pi/180) # in kpc currently
-    #     delta_ra = sep.degnp.sin(1.0ang.radian)dgal(np.pi/180)
-    if unit=='degrees':
-        delta_dec = ((sep.deg * np.cos(ang.radian)) * u.degree).value # in degrees
-        delta_ra = ((sep.deg * np.sin(1.0*ang.radian)) * u.degree).value
-    if unit=='arcmins':
-        delta_dec = (((sep.deg * np.cos(ang.radian)) * u.degree).to(u.arcmin)).value # in arcmin
-        delta_ra = (((sep.deg * np.sin(1.0*ang.radian)) * u.degree).to(u.arcmin)).value
-    if unit == 'arcsec':
-        delta_dec = (((sep.deg * np.cos(ang.radian)) * u.degree).to(u.arcsec)).value # in arcsec
-        delta_ra = (((sep.deg * np.sin(1.0*ang.radian)) * u.degree).to(u.arcsec)).value               
-    return delta_dec, delta_ra
-
-#### End of code from #From Jose MArcos Arias with soem amendmenets to work with my code syntax and definitions ####
-
-
 
 ###### Running KDE  #########
 #####Based on Code I used for Completeing Umich Astro 406 course #####
