@@ -240,33 +240,37 @@ def kde_2d(data_apt_clean, kind='kde', cmap='Blues'):
 #                dmod=dmod, ymin = 22.0, ymax=28.0, xmin = -1.0, xmax = 2.5, name=dwarf):
 
 def cmd_compare(f606_rgb, f814_rgb, mock_pop_with_obs_df, isoch, age, mets, dwarf,
-                ymin = 22.0, ymax=28.0, xmin = -1.0, xmax = 2.5):
+                ymin = 23.0, ymax=28.2, xmin = -1.0, xmax = 2.5, s=8):
+    
+    fig, ax = plt.subplots(figsize=(8, 5))
     #real CMD
-    plt.scatter(f606_rgb - f814_rgb, f814_rgb, c='blue', label='Selected Region')
+    ax.scatter(f606_rgb - f814_rgb, f814_rgb, s=s, c='blue', label='Selected Region')
 
     #mock CMD
-    plt.scatter(mock_pop_with_obs_df['F606W_obs'] - mock_pop_with_obs_df['F814W_obs'], mock_pop_with_obs_df['F814W_obs'], 
-            alpha=0.5, c='red', label = 'Mock Population')
+    ax.scatter(mock_pop_with_obs_df['F606W_obs'] - mock_pop_with_obs_df['F814W_obs'], mock_pop_with_obs_df['F814W_obs'], 
+            alpha=0.5, s=s, c='red', label = 'Mock Population')
     #isochrone
     cmdfilt = (isoch['logAge'] == age) & (isoch['MH'] == mets[0]) & (isoch['label'] < 9)
     w = isoch[cmdfilt]
     cmdfilt2 = (isoch['logAge'] == age) & (isoch['MH'] == mets[1]) & (isoch['label'] < 9)
     w2 = isoch[cmdfilt2]
 
-    plt.scatter(w['F606Wmag'] - w['F814Wmag'], w['F814Wmag'] + dwarf.dmod, color='k', alpha = 0.9, 
+    ax.scatter(w['F606Wmag'] - w['F814Wmag'], w['F814Wmag'] + dwarf.dmod, color='k', alpha = 0.9, s=s,
             label = f'logage = {age}, [M/H] = {mets[0]}')
-    plt.scatter(w2['F606Wmag'] - w2['F814Wmag'], w2['F814Wmag'] + dwarf.dmod, color='purple', alpha = 0.9, 
+    ax.scatter(w2['F606Wmag'] - w2['F814Wmag'], w2['F814Wmag'] + dwarf.dmod, color='purple', alpha = 0.9, s=s,
             label = f'logage = {age}, [M/H] = {mets[1]}')
 
     #plot
-    plt.ylim(ymin, ymax)
-    plt.xlim(xmin, xmax)
-    plt.gca().invert_yaxis()
-    plt.xlabel('F606W - F814W')
-    plt.ylabel('F814W')
-    plt.title('CMD for ' + dwarf.name)
-    plt.legend(loc='best')
-    plt.show()
+    ax.set_ylim(ymin, ymax)
+    ax.set_xlim(xmin, xmax)
+    #plt.gca().invert_yaxis()
+    ax.invert_yaxis()
+    ax.set_xlabel('F606W - F814W')
+    ax.set_ylabel('F814W')
+    ax.legend(loc='best')
+    ax.set_title('CMD for ' + dwarf.name)
+    #plt.show()
+    return fig
 
 def ks2_samp(data_color, mock_pop_color, direction='two-sided'):
     s1 = np.asarray(data_color)
@@ -291,11 +295,15 @@ def cdf_compare(data_color, mock_pop_color, dwarf):
     Returns
     -------
     '''
+    ### check for non-zero data
+    if len(data_color) == 0 or len(mock_pop_color) == 0:
+        raise ValueError("data_color and mock_pop_color must both contain finite values.")
+        
     #run 2-sample ks test
-    D, p = stats.ks_2samp(data_color, mock_pop_color)
+    D, p = stats.ks_2samp(data_color, mock_pop_color, nan_policy='omit')
 
     #set_up the ecdf to plot like in the documentation
-    ax = plt.subplot()
+    fig, ax = plt.subplots(figsize=(10,5))
 
     #data
     ecdf_input = stats.ecdf(data_color)
@@ -303,18 +311,27 @@ def cdf_compare(data_color, mock_pop_color, dwarf):
     #mock pop
     ecdf_output = stats.ecdf(mock_pop_color)
 
-    textplacement = np.min(data_color)
+    textplacement = min(np.nanmin(data_color), np.nanmin(mock_pop_color))
 
     #plot
     ecdf_input.cdf.plot(ax, label='Satellite RGB', color='blue')
     ecdf_output.cdf.plot(ax, label = 'Mock Population', color='red')
-    plt.xlabel("Color")
-    plt.ylabel("CDF")
-    plt.annotate(f'Distance = {D:.3f}', (textplacement -.2, 0.85), fontsize=12)
-    plt.annotate(f'p-value = {p:.3e}', (textplacement -.2, 0.8), fontsize=12)
-    plt.title(dwarf.name + " CDF for RGB vs. Drawn Population")
-    plt.legend()
-    plt.show()
+    ax.set(
+        xlabel="Color",
+        ylabel="CDF",
+        title=f"{dwarf.name} CDF for RGB vs. Drawn Population"
+    )
+    # ax.set_xlabel("Color")
+    # ax.set_ylabel("CDF")
+    # ax.title(dwarf.name + " CDF for RGB vs. Drawn Population")
+    ax.annotate(f'Distance = {D:.3f}', (textplacement -.2, 0.85), fontsize=12)
+    ax.annotate(f'p-value = {p:.3e}', (textplacement -.2, 0.8), fontsize=12)
+    
+    ax.legend()
+    fig.tight_layout()
+    #plt.show()
+
+    return fig, ax, D, p
 
 def kde_2d2(data_apt_clean, kind='kde', cmap='Blues'):
     '''
