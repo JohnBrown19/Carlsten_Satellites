@@ -304,74 +304,352 @@ def median_pop(dataframe, notes = "", return_N = False):
     
 
 ### AI rewrite ###
-def cull_data(data_pd,
-              snr_min_606=4.0,
-              snr_min_814=4.0,
-              err_max_606=3.0,
-              err_max_814=3.0,
-              sharp2_max_606=0.2,
-              sharp2_max_814=0.2,
-              crowd_max= 0.4,
-              objtype_max=2,
-              mag_max_606=99.0,
-              mag_max_814=99.0, 
-             Data=True):
+# def cull_data(data_pd,
+#               snr_min_606=4.0,
+#               snr_min_814=4.0,
+#               err_max_606=3.0,
+#               err_max_814=3.0,
+#               sharp2_max_606=0.2,
+#               sharp2_max_814=0.2,
+#               #crowd_max= 0.4,
+#               crowd_max= 0.4, #previous culls: 0.4
+#               objtype_max=2,
+#               mag_max_606=99.0,
+#               mag_max_814=99.0, 
+#              Data=True):
+#     """
+#     Apply quality cuts to a photometry dataframe.
+
+#     Parameters
+#     ----------
+    
+#     data_pd : pandas.DataFrame
+#         Input photometry table with ACS columns.
+#     snr_min_606, snr_min_814 : float
+#         Minimum S/N in F606W and F814W.
+#     err_max_606, err_max_814 : float
+#         Maximum magnitude error in F606W and F814W.
+#     sharp2_max_606, sharp2_max_814 : float
+#         Maximum sharp^2 in F606W and F814W.
+#     crowd_max_606, crowd_max_814 : float
+#         Maximum crowding in F606W and F814W.
+#     objtype_max : int
+#         Maximum allowed objtype_gl.
+#     mag_max_606, mag_max_814 : float
+#         Maximum allowed magnitudes (to reject 99.0 sentinel values).
+#     Data = True: Boolean
+#         Use the data culls if True
+#         Use the AST culls (same values, but the columns have different names) if False
+
+#     Returns
+#     -------
+    
+#     data_apt_clean : pandas.DataFrame
+#         Masked/cleaned dataframe.
+#     """
+
+#     def exposure_present(tab, exp_prefix):
+#         chip1 = f"{exp_prefix}.chip1_vega"
+#         chip2 = f"{exp_prefix}.chip2_vega"
+    
+#         has_chip1 = chip1 in tab.columns
+#         has_chip2 = chip2 in tab.columns
+    
+#         if has_chip1 and has_chip2:
+#             return (tab[chip1] != 99.999) | (tab[chip2] != 99.999)
+#         elif has_chip1:
+#             return tab[chip1] != 99.999
+#         elif has_chip2:
+#             return tab[chip2] != 99.999
+#         else:
+#             raise KeyError(f"No chip Vega columns found for exposure {exp_prefix}")
+    
+#     f606_exps = sorted({
+#         c.split(".chip")[0]
+#         for c in data_pd.columns
+#         if "F606W_flc.chip" in c and c.endswith("_vega")
+#         })
+    
+#     f814_exps = sorted({
+#         c.split(".chip")[0]
+#         for c in data_pd.columns
+#         if "F814W_flc.chip" in c and c.endswith("_vega")
+#         })
+    
+#     good_exposure_coverage = np.ones(len(data_pd), dtype=bool)
+
+#     for exp in f606_exps + f814_exps:
+#         good_exposure_coverage &= exposure_present(data_pd, exp)
+
+#     if Data: 
+#         data_mask = (
+#         (data_pd['acs_f606w_snr'] >= snr_min_606) &
+#         (data_pd['acs_f814w_snr'] >= snr_min_814) &
+#         (data_pd['acs_f606w_err'] <= err_max_606) &
+#         (data_pd['acs_f814w_err'] <= err_max_814) &
+#         (data_pd['acs_f606w_sharp']**2 < sharp2_max_606) &
+#         (data_pd['acs_f814w_sharp']**2 < sharp2_max_814) &
+# #        (data_pd['acs_f814w_crowd'] < crowd_max_814) &
+# #        (data_pd['acs_f606w_crowd'] < crowd_max_606) &
+#         (data_pd['acs_f606w_crowd'] + data_pd['acs_f814w_crowd'] <  crowd_max) &
+#         (data_pd['objtype_gl'] <= objtype_max) &
+#         (data_pd['acs_f606w_vega'] < mag_max_606) &
+#         (data_pd['acs_f814w_vega'] < mag_max_814) & good_exposure_coverage
+#         )
+
+#     else: #the"_1" columns are for 606, and the "" are for the 814
+#         data_mask = (
+#             (data_pd['snr_1'] >= snr_min_606) & (data_pd['snr'] >= snr_min_814) &
+#             (data_pd['err_1'] <= err_max_606) & (data_pd['err'] <= err_max_814) &
+#             (data_pd['shp_1']**2 < sharp2_max_606) & (data_pd['shp']**2 <sharp2_max_814) &
+#             ((data_pd['crow'] + data_pd['crow_1']) < crowd_max) &
+#             (data_pd['type'] <= objtype_max) #& good_exposure_coverage
+#             )
+
+#     clean_data = data_pd[data_mask]
+#     return clean_data
+
+def cull_data(
+    data_pd,
+    snr_min_606=4.0,
+    snr_min_814=4.0,
+    err_max_606=3.0,
+    err_max_814=3.0,
+    sharp2_max_606=0.2,
+    sharp2_max_814=0.2,
+    crowd_max=0.4,
+    objtype_max=2,
+    mag_max_606=99.0,
+    mag_max_814=99.0,
+    Data=True,
+):
     """
-    Apply quality cuts to a photometry dataframe.
+    Apply photometric quality cuts to observed photometry or ASTs.
 
     Parameters
     ----------
-    
-    data_pd : pandas.DataFrame
-        Input photometry table with ACS columns.
-    snr_min_606, snr_min_814 : float
-        Minimum S/N in F606W and F814W.
-    err_max_606, err_max_814 : float
-        Maximum magnitude error in F606W and F814W.
-    sharp2_max_606, sharp2_max_814 : float
-        Maximum sharp^2 in F606W and F814W.
-    crowd_max_606, crowd_max_814 : float
-        Maximum crowding in F606W and F814W.
-    objtype_max : int
-        Maximum allowed objtype_gl.
-    mag_max_606, mag_max_814 : float
-        Maximum allowed magnitudes (to reject 99.0 sentinel values).
-    Data = True: Boolean
-        Use the data culls if True
-        Use the AST culls (same values, but the columns have different names) if False
+    data_pd : pandas.DataFrame or astropy.table.Table
+        Input observed-photometry table when Data=True, or AST table when
+        Data=False.
+
+    Data : bool
+        True  -> observed photometry with ACS catalog column names.
+        False -> AST table with artificial-star column names.
 
     Returns
     -------
-    
-    data_apt_clean : pandas.DataFrame
-        Masked/cleaned dataframe.
+    clean_data : same type as input
+        Culled pandas DataFrame or Astropy Table.
     """
-    if Data: 
-        data_mask = (
-        (data_pd['acs_f606w_snr'] >= snr_min_606) &
-        (data_pd['acs_f814w_snr'] >= snr_min_814) &
-        (data_pd['acs_f606w_err'] <= err_max_606) &
-        (data_pd['acs_f814w_err'] <= err_max_814) &
-        (data_pd['acs_f606w_sharp']**2 < sharp2_max_606) &
-        (data_pd['acs_f814w_sharp']**2 < sharp2_max_814) &
-#        (data_pd['acs_f814w_crowd'] < crowd_max_814) &
-#        (data_pd['acs_f606w_crowd'] < crowd_max_606) &
-        (data_pd['acs_f606w_crowd'] + data_pd['acs_f814w_crowd'] <  crowd_max) &
-        (data_pd['objtype_gl'] <= objtype_max) &
-        (data_pd['acs_f606w_vega'] < mag_max_606) &
-        (data_pd['acs_f814w_vega'] < mag_max_814)
+
+    # --------------------------------------------------
+    # Helpers usable for either pandas DataFrames or Astropy Tables
+    # --------------------------------------------------
+    def get_column_names(tab):
+        if hasattr(tab, "columns"):
+            return list(tab.columns)
+
+        if hasattr(tab, "colnames"):
+            return list(tab.colnames)
+
+        raise TypeError(
+            "Input must be a pandas DataFrame or an Astropy Table."
         )
 
-    else: 
-        data_mask = (
-            (data_pd['snr_1'] >= 4.0) & (data_pd['snr'] >= 4.0) &
-            (data_pd['err_1'] <= 3.0) & (data_pd['err'] <= 3.0) &
-            (data_pd['shp_1']**2 < 0.2) & (data_pd['shp']**2 < 0.2) &
-            ((data_pd['crow'] + data_pd['crow_1']) < 0.4) &
-            (data_pd['type'] <= 2)
+    def valid_measurement(values, bad_mag=99.999):
+        """
+        True for finite, non-sentinel magnitudes.
+        """
+        values_array = np.asarray(values)
+
+        return (
+            np.isfinite(values_array)
+            & (values_array != bad_mag)
+            & (values_array < bad_mag)
+        )
+
+    # --------------------------------------------------
+    # Observed-photometry exposure logic
+    # --------------------------------------------------
+    def observed_exposure_present(tab, exp_prefix):
+        chip1 = f"{exp_prefix}.chip1_vega"
+        chip2 = f"{exp_prefix}.chip2_vega"
+
+        column_names = get_column_names(tab)
+
+        has_chip1 = chip1 in column_names
+        has_chip2 = chip2 in column_names
+
+        if has_chip1 and has_chip2:
+            return (
+                valid_measurement(tab[chip1])
+                | valid_measurement(tab[chip2])
             )
-        
+
+        if has_chip1:
+            return valid_measurement(tab[chip1])
+
+        if has_chip2:
+            return valid_measurement(tab[chip2])
+
+        raise KeyError(
+            f"No chip Vega columns found for exposure {exp_prefix}"
+        )
+
+    # --------------------------------------------------
+    # AST exposure logic
+    # --------------------------------------------------
+    def ast_exposure_present(tab, exposure_columns):
+        """
+        A valid AST measurement exists if the star is recovered on chip 1
+        or chip 2 for a given exposure.
+        """
+        column_names = get_column_names(tab)
+
+        available_cols = [
+            column_name
+            for column_name in exposure_columns
+            if column_name in column_names
+        ]
+
+        if len(available_cols) == 0:
+            raise KeyError(
+                "No AST exposure columns found for: "
+                f"{exposure_columns}"
+            )
+
+        exposure_mask = np.zeros(len(tab), dtype=bool)
+
+        for column_name in available_cols:
+            exposure_mask |= valid_measurement(tab[column_name])
+
+        return exposure_mask
+
+    # --------------------------------------------------
+    # Observed photometry culls
+    # --------------------------------------------------
+    if Data:
+        column_names = get_column_names(data_pd)
+
+        f606_exposures = sorted({
+            column_name.split(".chip")[0]
+            for column_name in column_names
+            if (
+                "F606W_flc.chip" in column_name
+                and column_name.endswith("_vega")
+            )
+        })
+
+        f814_exposures = sorted({
+            column_name.split(".chip")[0]
+            for column_name in column_names
+            if (
+                "F814W_flc.chip" in column_name
+                and column_name.endswith("_vega")
+            )
+        })
+
+        if len(f606_exposures) == 0:
+            raise KeyError("No F606W exposure Vega columns were found.")
+
+        if len(f814_exposures) == 0:
+            raise KeyError("No F814W exposure Vega columns were found.")
+
+        good_exposure_coverage = np.ones(len(data_pd), dtype=bool)
+
+        # Strict requirement: detected in every individual exposure.
+        for exposure_prefix in f606_exposures + f814_exposures:
+            good_exposure_coverage &= observed_exposure_present(
+                data_pd,
+                exposure_prefix,
+            )
+
+        data_mask = (
+            (data_pd["acs_f606w_snr"] >= snr_min_606)
+            & (data_pd["acs_f814w_snr"] >= snr_min_814)
+            & (data_pd["acs_f606w_err"] <= err_max_606)
+            & (data_pd["acs_f814w_err"] <= err_max_814)
+            & (data_pd["acs_f606w_sharp"] ** 2 < sharp2_max_606)
+            & (data_pd["acs_f814w_sharp"] ** 2 < sharp2_max_814)
+            & (
+                data_pd["acs_f606w_crowd"]
+                + data_pd["acs_f814w_crowd"]
+                < crowd_max
+            )
+            & (data_pd["objtype_gl"] <= objtype_max)
+            & (data_pd["acs_f606w_vega"] < mag_max_606)
+            & (data_pd["acs_f814w_vega"] < mag_max_814)
+            & good_exposure_coverage
+        )
+
+    # --------------------------------------------------
+    # AST culls
+    # --------------------------------------------------
+    else:
+        column_names = get_column_names(data_pd)
+
+        # These represent individual exposure groups, each with chip 1/2.
+        ast_606_exposure_groups = [
+            ["m606_exp1_chip1", "m606_exp1_chip2"],
+            ["m606_exp2_chip1", "m606_exp2_chip2"],
+        ]
+
+        ast_814_exposure_groups = [
+            ["m814_exp1_chip1", "m814_exp1_chip2"],
+            ["m814_exp2_chip1", "m814_exp2_chip2"],
+        ]
+
+        # Keep only exposure groups that actually exist in this AST layout.
+        existing_606_groups = [
+            group
+            for group in ast_606_exposure_groups
+            if any(column_name in column_names for column_name in group)
+        ]
+
+        existing_814_groups = [
+            group
+            for group in ast_814_exposure_groups
+            if any(column_name in column_names for column_name in group)
+        ]
+
+        if len(existing_606_groups) == 0:
+            raise KeyError("No AST F606W exposure columns were found.")
+
+        if len(existing_814_groups) == 0:
+            raise KeyError("No AST F814W exposure columns were found.")
+
+        ast_good_exposure_coverage = np.ones(
+            len(data_pd),
+            dtype=bool,
+        )
+
+        # Strict requirement: recovered in every available exposure group.
+        for exposure_group in existing_606_groups + existing_814_groups:
+            ast_good_exposure_coverage &= ast_exposure_present(
+                data_pd,
+                exposure_group,
+            )
+
+        data_mask = (
+            (data_pd["snr_1"] >= snr_min_606)
+            & (data_pd["snr"] >= snr_min_814)
+            & (data_pd["err_1"] <= err_max_606)
+            & (data_pd["err"] <= err_max_814)
+            & (data_pd["shp_1"] ** 2 < sharp2_max_606)
+            & (data_pd["shp"] ** 2 < sharp2_max_814)
+            & (
+                data_pd["crow_1"]
+                + data_pd["crow"]
+                < crowd_max
+            )
+            & (data_pd["type"] <= objtype_max)
+            & (data_pd["m606_out"] < mag_max_606)
+            & (data_pd["m814_out"] < mag_max_814)
+            & ast_good_exposure_coverage
+        )
+
     clean_data = data_pd[data_mask]
+
     return clean_data
 
 #### AST_completneess table + interpolating functions for magnitude and completion #######
@@ -990,160 +1268,160 @@ def ecdf_on_grid(sorted_sample, x_grid):
 
 ## Color spread ###
 
-def color_spread_weighting(
-    isoch,
-    data_color,
-    interp_mag_to_comp,
-    bias_interp_814,
-    scatter_interp_814,
-    bias_interp_606,
-    scatter_interp_606,
-    dmod,
-    log_mass,
-    fixed_age=9.9,
-    mets=[-2.19174, -0.5],
-    smooth=False,
-    smooth_factor=1.e1,
-    seed=None
-):
-    start_time = time.time()
+# def color_spread_weighting(
+#     isoch,
+#     data_color,
+#     interp_mag_to_comp,
+#     bias_interp_814,
+#     scatter_interp_814,
+#     bias_interp_606,
+#     scatter_interp_606,
+#     dmod,
+#     log_mass,
+#     fixed_age=9.9,
+#     mets=[-2.19174, -0.5],
+#     smooth=False,
+#     smooth_factor=1.e1,
+#     seed=None
+# ):
+#     start_time = time.time()
     
-    print(f"Running for logAge = {fixed_age}, MH = {mets[0]}")
-    blue_color = make_and_eval_mock_pop(
-        isoch, fixed_age, mets[0],
-        dmod=dmod,
-        log_mass=log_mass,
-        interp_mag_to_comp=interp_mag_to_comp,
-        bias_interp_814=bias_interp_814,
-        scatter_interp_814=scatter_interp_814,
-        bias_interp_606=bias_interp_606,
-        scatter_interp_606=scatter_interp_606,
-        smooth=smooth,
-        smooth_factor=smooth_factor,
-        weight=1.0,
-        seed=seed
-    )
+#     print(f"Running for logAge = {fixed_age}, MH = {mets[0]}")
+#     blue_color = make_and_eval_mock_pop(
+#         isoch, fixed_age, mets[0],
+#         dmod=dmod,
+#         log_mass=log_mass,
+#         interp_mag_to_comp=interp_mag_to_comp,
+#         bias_interp_814=bias_interp_814,
+#         scatter_interp_814=scatter_interp_814,
+#         bias_interp_606=bias_interp_606,
+#         scatter_interp_606=scatter_interp_606,
+#         smooth=smooth,
+#         smooth_factor=smooth_factor,
+#         weight=1.0,
+#         seed=seed
+#     )
     
-    print(f"Running for logAge = {fixed_age}, MH = {mets[1]}")
-    red_color = make_and_eval_mock_pop(
-        isoch, fixed_age, mets[1],
-        dmod=dmod,
-        log_mass=log_mass,
-        interp_mag_to_comp=interp_mag_to_comp,
-        bias_interp_814=bias_interp_814,
-        scatter_interp_814=scatter_interp_814,
-        bias_interp_606=bias_interp_606,
-        scatter_interp_606=scatter_interp_606,
-        smooth=smooth,
-        smooth_factor=smooth_factor,
-        weight=1.0,
-        seed=seed
-    )
+#     print(f"Running for logAge = {fixed_age}, MH = {mets[1]}")
+#     red_color = make_and_eval_mock_pop(
+#         isoch, fixed_age, mets[1],
+#         dmod=dmod,
+#         log_mass=log_mass,
+#         interp_mag_to_comp=interp_mag_to_comp,
+#         bias_interp_814=bias_interp_814,
+#         scatter_interp_814=scatter_interp_814,
+#         bias_interp_606=bias_interp_606,
+#         scatter_interp_606=scatter_interp_606,
+#         smooth=smooth,
+#         smooth_factor=smooth_factor,
+#         weight=1.0,
+#         seed=seed
+#     )
 
-    # ---- Clean + sort samples ----
-    blue_stars = np.sort(np.asarray(blue_color))
-    red_stars  = np.sort(np.asarray(red_color))
-    data_stars = np.sort(np.asarray(data_color))
+#     # ---- Clean + sort samples ----
+#     blue_stars = np.sort(np.asarray(blue_color))
+#     red_stars  = np.sort(np.asarray(red_color))
+#     data_stars = np.sort(np.asarray(data_color))
 
-    blue_stars = blue_stars[np.isfinite(blue_stars)]
-    red_stars  = red_stars[np.isfinite(red_stars)]
-    data_stars = data_stars[np.isfinite(data_stars)]
+#     blue_stars = blue_stars[np.isfinite(blue_stars)]
+#     red_stars  = red_stars[np.isfinite(red_stars)]
+#     data_stars = data_stars[np.isfinite(data_stars)]
 
-    print("len blue:", len(blue_stars))
-    print("len red :", len(red_stars))
+#     print("len blue:", len(blue_stars))
+#     print("len red :", len(red_stars))
 
-    #update. Before, this wasn't breaking becasue I had accidently set the seed in a way that it wouldn't break. 
-    # if len(blue_stars) < 2 or len(red_stars) < 2 or len(data_stars) < 2:
-    #     raise ValueError("One of your samples has <2 finite values. Cannot build ECDFs reliably.")
+#     #update. Before, this wasn't breaking becasue I had accidently set the seed in a way that it wouldn't break. 
+#     # if len(blue_stars) < 2 or len(red_stars) < 2 or len(data_stars) < 2:
+#     #     raise ValueError("One of your samples has <2 finite values. Cannot build ECDFs reliably.")
 
     
-    if len(data_stars) < 2:
-        raise ValueError("data_color has <2 finite values. Cannot build ECDF reliably.")
+#     if len(data_stars) < 2:
+#         raise ValueError("data_color has <2 finite values. Cannot build ECDF reliably.")
 
-    # allow one endpoint to be tiny/empty; only fail if both are unusable
-    if len(blue_stars) < 2 and len(red_stars) < 2:
-        raise ValueError("Both model samples have <2 finite values. Cannot compare to data reliably.")
+#     # allow one endpoint to be tiny/empty; only fail if both are unusable
+#     if len(blue_stars) < 2 and len(red_stars) < 2:
+#         raise ValueError("Both model samples have <2 finite values. Cannot compare to data reliably.")
 
-    x_grid = data_stars
+#     x_grid = data_stars
 
-    F_blue = ecdf_on_grid(blue_stars, x_grid)
-    F_red  = ecdf_on_grid(red_stars, x_grid)
-    F_data_on_grid = ecdf_on_grid(data_stars, x_grid)
+#     F_blue = ecdf_on_grid(blue_stars, x_grid)
+#     F_red  = ecdf_on_grid(red_stars, x_grid)
+#     F_data_on_grid = ecdf_on_grid(data_stars, x_grid)
 
-    weights = np.arange(0.0, 1.01, 0.01)
-    w_list, D_list, p_list = [], [], []
+#     weights = np.arange(0.0, 1.01, 0.01)
+#     w_list, D_list, p_list = [], [], []
 
-    for w in weights:
-        F_mix = w * F_blue + (1.0 - w) * F_red
+#     for w in weights:
+#         F_mix = w * F_blue + (1.0 - w) * F_red
 
-        Fmix_callable = interp1d(
-            x_grid, F_mix,
-            bounds_error=False,
-            fill_value=(0.0, 1.0),
-            assume_sorted=True
-        )
+#         Fmix_callable = interp1d(
+#             x_grid, F_mix,
+#             bounds_error=False,
+#             fill_value=(0.0, 1.0),
+#             assume_sorted=True
+#         )
 
-        D, p = stats.kstest(
-            data_stars,
-            Fmix_callable,
-            alternative="two-sided",
-            mode="asymp"
-        )
+#         D, p = stats.kstest(
+#             data_stars,
+#             Fmix_callable,
+#             alternative="two-sided",
+#             mode="asymp"
+#         )
 
-        w_list.append(w)
-        D_list.append(D)
-        p_list.append(p)
+#         w_list.append(w)
+#         D_list.append(D)
+#         p_list.append(p)
 
-    res = pd.DataFrame({
-        "weights": w_list,
-        "KS_D_1samp": D_list,
-        "KS_p_1samp": p_list
-    })
+#     res = pd.DataFrame({
+#         "weights": w_list,
+#         "KS_D_1samp": D_list,
+#         "KS_p_1samp": p_list
+#     })
 
-    best_idx = int(np.argmin(res["KS_D_1samp"].values))
-    w_best = float(res.loc[best_idx, "weights"])
-    D_best = float(res.loc[best_idx, "KS_D_1samp"])
-    p_best = float(res.loc[best_idx, "KS_p_1samp"])
+#     best_idx = int(np.argmin(res["KS_D_1samp"].values))
+#     w_best = float(res.loc[best_idx, "weights"])
+#     D_best = float(res.loc[best_idx, "KS_D_1samp"])
+#     p_best = float(res.loc[best_idx, "KS_p_1samp"])
 
-    print("Best weight (w_best):", w_best)
-    print("Best 1-sample KS D:", D_best)
-    print("1-sample KS p-value at w_best:", p_best)
+#     print("Best weight (w_best):", w_best)
+#     print("Best 1-sample KS D:", D_best)
+#     print("1-sample KS p-value at w_best:", p_best)
 
-    plt.figure(figsize=(7, 4))
-    plt.plot(res["weights"], res["KS_D_1samp"], lw=2)
-    plt.xlabel("w (fraction of BLUE component)")
-    plt.ylabel("1-sample KS D")
-    plt.title("1-sample KS distance vs mixture weight")
-    plt.grid(alpha=0.25)
-    plt.show()
+#     plt.figure(figsize=(7, 4))
+#     plt.plot(res["weights"], res["KS_D_1samp"], lw=2)
+#     plt.xlabel("w (fraction of BLUE component)")
+#     plt.ylabel("1-sample KS D")
+#     plt.title("1-sample KS distance vs mixture weight")
+#     plt.grid(alpha=0.25)
+#     plt.show()
 
-    plt.figure(figsize=(7, 4))
-    plt.plot(res["weights"], res["KS_p_1samp"], lw=2)
-    plt.xlabel("w (fraction of BLUE component)")
-    plt.ylabel("1-sample KS p-value")
-    plt.yscale("log")
-    plt.title("1-sample KS p-value vs mixture weight")
-    plt.grid(alpha=0.25)
-    plt.show()
+#     plt.figure(figsize=(7, 4))
+#     plt.plot(res["weights"], res["KS_p_1samp"], lw=2)
+#     plt.xlabel("w (fraction of BLUE component)")
+#     plt.ylabel("1-sample KS p-value")
+#     plt.yscale("log")
+#     plt.title("1-sample KS p-value vs mixture weight")
+#     plt.grid(alpha=0.25)
+#     plt.show()
 
-    F_mix_best = w_best * F_blue + (1.0 - w_best) * F_red
+#     F_mix_best = w_best * F_blue + (1.0 - w_best) * F_red
 
-    plt.figure(figsize=(8, 6))
-    plt.plot(x_grid, F_data_on_grid, "k-", lw=2.5, label="Data ECDF (on data grid)")
-    plt.plot(x_grid, F_mix_best, "r-", lw=2.5, label=f"Best mixture CDF (w={w_best:.2f})")
-    plt.plot(x_grid, F_blue, "--", lw=2, label="Blue CDF (on data grid)")
-    plt.plot(x_grid, F_red, "--", lw=2, label="Red CDF (on data grid)")
-    plt.xlabel("Color (F606W - F814W)")
-    plt.ylabel("CDF")
-    plt.title("Best-fit mixture CDF vs data")
-    plt.legend()
-    plt.grid(alpha=0.25)
-    plt.show()
+#     plt.figure(figsize=(8, 6))
+#     plt.plot(x_grid, F_data_on_grid, "k-", lw=2.5, label="Data ECDF (on data grid)")
+#     plt.plot(x_grid, F_mix_best, "r-", lw=2.5, label=f"Best mixture CDF (w={w_best:.2f})")
+#     plt.plot(x_grid, F_blue, "--", lw=2, label="Blue CDF (on data grid)")
+#     plt.plot(x_grid, F_red, "--", lw=2, label="Red CDF (on data grid)")
+#     plt.xlabel("Color (F606W - F814W)")
+#     plt.ylabel("CDF")
+#     plt.title("Best-fit mixture CDF vs data")
+#     plt.legend()
+#     plt.grid(alpha=0.25)
+#     plt.show()
 
-    print('execution time = %.3f seconds' % (time.time() - start_time))
-    print('execution time = %.3f minutes' % ((time.time() - start_time) / 60.0))
+#     print('execution time = %.3f seconds' % (time.time() - start_time))
+#     print('execution time = %.3f minutes' % ((time.time() - start_time) / 60.0))
 
-    return w_best
+#     return w_best
 
 def color_spread_weighting(
     isoch,
@@ -1220,7 +1498,7 @@ def color_spread_weighting(
     F_data_on_grid = ecdf_on_grid(data_stars, x_grid)
 
     weights = np.arange(0.0, 1.01, 0.01)
-    w_list, D_list, p_list = [], [], []
+    w_list, D_list, p_list, loc_list, sign_list = [], [], [], [],[]
 
     for w in weights:
         F_mix = w * F_blue + (1.0 - w) * F_red
@@ -1233,33 +1511,53 @@ def color_spread_weighting(
             assume_sorted=True
         )
 
-        D, p = stats.kstest(
-            data_stars,
-            Fmix_callable,
-            alternative="two-sided",
-            mode="asymp"
-        )
+        # D, p = stats.kstest(
+        #     data_stars,
+        #     Fmix_callable,
+        #     alternative="two-sided",
+        #     mode="asymp"
+        # )
+        ks_result = stats.kstest(data_stars, Fmix_callable, alternative="two-sided", mode="auto")
+
+        D = ks_result.statistic
+        p = ks_result.pvalue
+        loc = ks_result.statistic_location
+        sign = ks_result.statistic_sign
 
         w_list.append(w)
         D_list.append(D)
         p_list.append(p)
+        loc_list.append(loc)
+        sign_list.append(sign)
 
     res = pd.DataFrame({
         "weights": w_list,
         "KS_D_1samp": D_list,
-        "KS_p_1samp": p_list
+        "KS_p_1samp": p_list, 
+        "KS_loc_1samp": loc_list,
+        "KS_sign_1samp": sign_list
     })
 
-    best_idx = int(np.argmin(res["KS_D_1samp"].values))
+    # best_idx = int(np.argmin(res["KS_D_1samp"].values))
+    best_idx = res["KS_D_1samp"].idxmin()
     w_best = float(res.loc[best_idx, "weights"])
     D_best = float(res.loc[best_idx, "KS_D_1samp"])
     p_best = float(res.loc[best_idx, "KS_p_1samp"])
+    loc_best = float(res.loc[best_idx, "KS_loc_1samp"])
 
     print("Best weight (w_best):", w_best)
     print("Best 1-sample KS D:", D_best)
     print("1-sample KS p-value at w_best:", p_best)
+    print("1-sample KS location at w_best:", loc_best)
 
     F_mix_best = w_best * F_blue + (1.0 - w_best) * F_red
+
+    ### find reference RGB Color at MH = -2.2
+    rgb_ref_color = rgb_color_from_isochrone(
+    isoch, fixed_age, met=-2.19174, mag_offset=0.5, f606_col="F606Wmag",
+    f814_col="F814Wmag",
+    age_col="logAge",
+    met_col="MH", label_col="label", rgb_label=3, use_nearest=True, return_info=False)
 
     figs = {}
 
@@ -1294,14 +1592,17 @@ def color_spread_weighting(
         ax_cdf.plot(x_grid, F_mix_best, "r-", lw=2.5, label=f"Best mixture CDF (w={w_best:.2f})")
         ax_cdf.plot(x_grid, F_blue, "--", lw=2, label="Blue CDF")
         ax_cdf.plot(x_grid, F_red, "--", lw=2, label="Red CDF")
+        ax_cdf.axvline(loc_best, color="green", ls=":", lw=2, label=f"Max KS location = {loc_best:.3f}")
+        ax_cdf.axvline(rgb_ref_color, color="dodgerblue", ls="-.", lw=2.5,
+                        label=f"RGB color for [M/H]={mets[0]:.2f}, age={fixed_age:.2f}")
         ax_cdf.set(
             xlabel="Color (F606W - F814W)",
             ylabel="CDF",
             title="Best-fit mixture CDF vs data"
         )
         textplacement = np.min([F_data_on_grid, F_mix_best, F_blue, F_red])
-        ax_cdf.annotate(f'Distance = {D_best:.3f}', (textplacement -.2, 0.8), fontsize=12)
-        ax_cdf.annotate(f'p-value = {p_best:.3e}', (textplacement -.2, 0.7), fontsize=12)
+        ax_cdf.annotate(f'Distance = {D_best:.3f}', (textplacement -.2, 0.7), fontsize=12)
+        ax_cdf.annotate(f'p-value = {p_best:.3e}', (textplacement -.2, 0.6), fontsize=12)
         ax_cdf.legend()
         ax_cdf.grid(alpha=0.25)
         fig_cdf.tight_layout()
@@ -1314,6 +1615,7 @@ def color_spread_weighting(
         "w_best": w_best,
         "D_best": D_best,
         "p_best": p_best,
+        "loc_best": loc_best,
         "results": res,
         "figures": figs,
         "blue_color": blue_stars,
@@ -1331,6 +1633,501 @@ def pc_to_arcmin(radius_pc, distance_mpc):
     theta_rad = radius_pc / distance_pc
     theta_arcmin = np.degrees(theta_rad) * 60
     return theta_arcmin
+
+def rgb_color_from_isochrone(
+    isoch,
+    logage,
+    met=-2.19174,
+    mag_offset=0.5,
+    f606_col="F606Wmag",
+    f814_col="F814Wmag",
+    age_col="logAge",
+    met_col="MH",
+    label_col="label",
+    rgb_label=3,
+    use_nearest=False,
+    return_info=False
+):
+    """
+    Get the fiducial RGB color directly from an isochrone.
+
+    The returned color is evaluated at:
+
+        M_F814W = M_TRGB_iso + mag_offset
+
+    where mag_offset=0.5 corresponds to the midpoint in magnitude
+    between the TRGB and one magnitude below the TRGB.
+
+    Parameters
+    ----------
+    isoch : pandas.DataFrame or astropy Table
+        Isochrone table.
+
+    logage : float
+        Desired log10(age/yr), e.g.
+        8 Gyr  -> np.log10(8e9)
+        10 Gyr -> 10.0
+        13 Gyr -> np.log10(13e9)
+
+    met : float
+        Desired [M/H]. For your case, use approximately -2.19174.
+
+    mag_offset : float
+        Magnitude below the isochrone TRGB at which to evaluate the color.
+        Use 0.5 for the midpoint between TRGB and TRGB+1.
+
+    f606_col, f814_col : str
+        Isochrone magnitude column names.
+
+    age_col, met_col, label_col : str
+        Isochrone metadata column names.
+
+    rgb_label : int
+        PARSEC RGB evolutionary label. Usually label == 3 for RGB.
+
+    use_nearest : bool
+        If True, use the nearest available age and metallicity in the table.
+
+    return_info : bool
+        If True, return additional diagnostic information.
+
+    Returns
+    -------
+    rgb_color : float
+        Fiducial F606W - F814W color at M_TRGB + mag_offset.
+    """
+
+    # Convert astropy Table to pandas if needed
+    if hasattr(isoch, "to_pandas"):
+        iso = isoch.to_pandas()
+    else:
+        iso = isoch.copy()
+
+    # Find nearest available logAge and MH
+    if use_nearest:
+        ages = np.unique(iso[age_col])
+        mets = np.unique(iso[met_col])
+
+        chosen_age = ages[np.argmin(np.abs(ages - logage))]
+        chosen_met = mets[np.argmin(np.abs(mets - met))]
+    else:
+        chosen_age = logage
+        chosen_met = met
+
+    # Select the desired isochrone
+    mask = (
+        (iso[age_col] == chosen_age) &
+        (iso[met_col] == chosen_met)
+    )
+
+    iso_sel = iso.loc[mask].copy()
+
+    if len(iso_sel) == 0:
+        raise ValueError(
+            f"No isochrone points found for logAge={chosen_age}, MH={chosen_met}."
+        )
+
+    # Select RGB points. For PARSEC, RGB is usually label == 3.
+    if label_col in iso_sel.columns:
+        rgb = iso_sel.loc[iso_sel[label_col] == rgb_label].copy()
+
+        # Fallback if label==3 gives nothing
+        if len(rgb) == 0:
+            print(
+                f"Warning: no label=={rgb_label} points found. "
+                "Falling back to label < 9."
+            )
+            rgb = iso_sel.loc[iso_sel[label_col] < 9].copy()
+    else:
+        print("Warning: no label column found. Using all selected isochrone points.")
+        rgb = iso_sel.copy()
+
+    if len(rgb) < 2:
+        raise ValueError("Not enough RGB points to interpolate.")
+
+    # Color
+    rgb["color"] = rgb[f606_col] - rgb[f814_col]
+
+    # TRGB = brightest RGB point in F814W = minimum F814W magnitude
+    idx_trgb = rgb[f814_col].idxmin()
+    M814_trgb = rgb.loc[idx_trgb, f814_col]
+
+    # Target magnitude: midpoint between TRGB and TRGB+1 if mag_offset=0.5
+    M814_ref = M814_trgb + mag_offset
+
+    # Sort by F814W for interpolation
+    rgb_sorted = rgb.sort_values(f814_col)
+
+    M814_arr = rgb_sorted[f814_col].to_numpy()
+    color_arr = rgb_sorted["color"].to_numpy()
+
+    # Remove non-finite values
+    good = np.isfinite(M814_arr) & np.isfinite(color_arr)
+    M814_arr = M814_arr[good]
+    color_arr = color_arr[good]
+
+    if M814_ref < np.min(M814_arr) or M814_ref > np.max(M814_arr):
+        raise ValueError(
+            f"Requested M814_ref={M814_ref:.3f} is outside the RGB range "
+            f"[{np.min(M814_arr):.3f}, {np.max(M814_arr):.3f}]."
+        )
+
+    # Interpolate color at the target F814W magnitude
+    color_interp = interp1d(
+        M814_arr,
+        color_arr,
+        bounds_error=True
+    )
+
+    rgb_color = float(color_interp(M814_ref))
+
+    if return_info:
+        info = {
+            "requested_logage": logage,
+            "chosen_logage": chosen_age,
+            "requested_MH": met,
+            "chosen_MH": chosen_met,
+            "M814_trgb_iso": float(M814_trgb),
+            "M814_ref_iso": float(M814_ref),
+            "mag_offset": mag_offset,
+            "N_rgb_points": len(rgb)
+        }
+        return rgb_color, info
+
+    return rgb_color
+
+def make_best_weight_composite_mock(
+    isoch,
+    fixed_age,
+    mets,
+    dmod,
+    log_mass,
+    w_best,
+    interp_mag_to_comp,
+    bias_interp_814,
+    scatter_interp_814,
+    bias_interp_606,
+    scatter_interp_606,
+    seed=7,
+    smooth=False,
+    smooth_factor=1.0):
+    """
+    Build a composite mock population using the best-fit CDF mixture weight.
+
+    w_best is interpreted as the fraction of the low-metallicity / blue component.
+    """
+
+    met_blue = mets[0]
+    met_red = mets[1]
+
+    mock_blue_best = make_and_eval_mock_pop2(
+        isoch,
+        fixed_age,
+        met_blue,
+        dmod=dmod,
+        log_mass=log_mass,
+        interp_mag_to_comp=interp_mag_to_comp,
+        bias_interp_814=bias_interp_814,
+        scatter_interp_814=scatter_interp_814,
+        bias_interp_606=bias_interp_606,
+        scatter_interp_606=scatter_interp_606,
+        smooth=smooth,
+        smooth_factor=smooth_factor,
+        weight=w_best,
+        seed=seed,
+    )
+
+    mock_red_best = make_and_eval_mock_pop2(
+        isoch,
+        fixed_age,
+        met_red,
+        dmod=dmod,
+        log_mass=log_mass,
+        interp_mag_to_comp=interp_mag_to_comp,
+        bias_interp_814=bias_interp_814,
+        scatter_interp_814=scatter_interp_814,
+        bias_interp_606=bias_interp_606,
+        scatter_interp_606=scatter_interp_606,
+        smooth=smooth,
+        smooth_factor=smooth_factor,
+        weight=1.0 - w_best,
+        seed=seed + 1000,
+    )
+
+    mock_blue_best = mock_blue_best.copy()
+    mock_red_best = mock_red_best.copy()
+
+    mock_blue_best["component"] = "blue"
+    mock_blue_best["MH_component"] = met_blue
+    mock_blue_best["weight_component"] = w_best
+
+    mock_red_best["component"] = "red"
+    mock_red_best["MH_component"] = met_red
+    mock_red_best["weight_component"] = 1.0 - w_best
+
+    mock_composite_best = pd.concat(
+        [mock_blue_best, mock_red_best],
+        ignore_index=True,
+    )
+
+    # Keep only recovered mock stars
+    mock_composite_best = mock_composite_best.dropna(
+        subset=["F606W_obs", "F814W_obs"]
+    ).copy()
+
+    mock_composite_best["color_obs"] = (
+        mock_composite_best["F606W_obs"]
+        - mock_composite_best["F814W_obs"]
+    )
+
+    return mock_composite_best
+
+def plot_best_weight_composite_cmd(
+    isoch,
+    obs_df,
+    dwarf,
+    fixed_age,
+    mets,
+    w_best,
+    interp_mag_to_comp,
+    bias_interp_814,
+    scatter_interp_814,
+    bias_interp_606,
+    scatter_interp_606,
+    seed=7,
+    smooth=False,
+    smooth_factor=1.0,
+    obs_f606_col="acs_f606w_vega",
+    obs_f814_col="acs_f814w_vega",
+    mock_f606_col="F606W_obs",
+    mock_f814_col="F814W_obs",
+    component_plot=True,
+    save=False,
+    filename=None,
+    subfolder="plots/color_spread"):
+    """
+    Plot observed CMD against the best-weight composite mock CMD.
+
+    Parameters
+    ----------
+    isoch : pandas.DataFrame or astropy Table
+        Isochrone grid used to generate mock populations.
+
+    obs_df : pandas.DataFrame
+        Observed stars to compare against the mock population.
+        Usually obs_below_trgb or another target-aperture RGB sample.
+
+    dwarf : Dwarf
+        Dwarf object. Used for dmod, logmass, name, and optional saving.
+
+    fixed_age : float
+        Isochrone logAge, e.g. 9.9 for ~8 Gyr.
+
+    mets : list-like
+        Metallicities used in the two-component mixture.
+        mets[0] is the blue/metal-poor component.
+        mets[1] is the red/metal-rich component.
+
+    w_best : float
+        Best-fit mixture weight for the blue/metal-poor component.
+
+    component_plot : bool
+        If True, color the mock stars by blue/red component.
+        If False, plot the composite mock as one population.
+
+    save : bool
+        If True, save figure using dwarf.save_figure.
+
+    filename : str or None
+        Filename for saved figure. If None, a default name is used.
+
+    Returns
+    -------
+    fig, axes, mock_composite_best
+        Matplotlib figure, axes, and the generated composite mock dataframe.
+    """
+
+    mock_composite_best = make_best_weight_composite_mock(
+        isoch=isoch,
+        fixed_age=fixed_age,
+        mets=mets,
+        dmod=dwarf.dmod,
+        log_mass=dwarf.logmass,
+        w_best=w_best,
+        interp_mag_to_comp=interp_mag_to_comp,
+        bias_interp_814=bias_interp_814,
+        scatter_interp_814=scatter_interp_814,
+        bias_interp_606=bias_interp_606,
+        scatter_interp_606=scatter_interp_606,
+        seed=seed,
+        smooth=smooth,
+        smooth_factor=smooth_factor,
+    )
+
+    obs_color = obs_df[obs_f606_col] - obs_df[obs_f814_col]
+    mock_color = mock_composite_best[mock_f606_col] - mock_composite_best[mock_f814_col]
+
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=(12, 6),
+        sharey=True,
+    )
+
+    # Observed CMD
+    axes[0].scatter(
+        obs_color,
+        obs_df[obs_f814_col],
+        s=18,
+        alpha=0.8,
+        edgecolor="k",
+        linewidth=0.2,
+    )
+
+    axes[0].set_title(f"{dwarf.name}: observed target CMD")
+    axes[0].set_xlabel("F606W - F814W")
+    axes[0].set_ylabel("F814W")
+
+    # Composite mock CMD
+    if component_plot and "component" in mock_composite_best.columns:
+        blue_mock = mock_composite_best[
+            mock_composite_best["component"] == "blue"
+        ]
+
+        red_mock = mock_composite_best[
+            mock_composite_best["component"] == "red"
+        ]
+
+        axes[1].scatter(
+            blue_mock[mock_f606_col] - blue_mock[mock_f814_col],
+            blue_mock[mock_f814_col],
+            s=18,
+            alpha=0.75,
+            label=f"[M/H]={mets[0]:.2f}, w={w_best:.2f}",
+        )
+
+        axes[1].scatter(
+            red_mock[mock_f606_col] - red_mock[mock_f814_col],
+            red_mock[mock_f814_col],
+            s=18,
+            alpha=0.75,
+            label=f"[M/H]={mets[1]:.2f}, w={1.0 - w_best:.2f}",
+        )
+
+        axes[1].legend()
+
+    else:
+        axes[1].scatter(
+            mock_color,
+            mock_composite_best[mock_f814_col],
+            s=18,
+            alpha=0.8,
+            edgecolor="k",
+            linewidth=0.2,
+        )
+
+    axes[1].set_title(
+        f"Best composite mock\n"
+        f"w_blue={w_best:.2f}, w_red={1.0 - w_best:.2f}"
+    )
+    axes[1].set_xlabel("F606W - F814W")
+
+    axes[0].invert_yaxis()
+
+    for ax in axes:
+        ax.grid(alpha=0.25)
+
+    fig.tight_layout()
+
+    if save:
+        if filename is None:
+            filename = f"Best_weight_composite_CMD_{dwarf.name}_{fixed_age:.2f}.png"
+
+        dwarf.save_figure(
+            fig,
+            filename,
+            subfolder=subfolder,
+        )
+
+    return fig, axes, mock_composite_best
+
+def make_best_weight_composite_mock(
+    isoch,
+    fixed_age,
+    mets,
+    dmod,
+    log_mass,
+    w_best,
+    interp_mag_to_comp,
+    bias_interp_814,
+    scatter_interp_814,
+    bias_interp_606,
+    scatter_interp_606,
+    seed=7,
+    smooth=False,
+    smooth_factor=1.0,
+):
+
+    mock_parts = []
+
+    # Blue component
+    if w_best > 0:
+
+        mock_blue_best = make_and_eval_mock_pop2(
+            isoch,
+            fixed_age,
+            mets[0],
+            dmod=dmod,
+            log_mass=log_mass,
+            interp_mag_to_comp=interp_mag_to_comp,
+            bias_interp_814=bias_interp_814,
+            scatter_interp_814=scatter_interp_814,
+            bias_interp_606=bias_interp_606,
+            scatter_interp_606=scatter_interp_606,
+            smooth=smooth,
+            smooth_factor=smooth_factor,
+            weight=w_best,
+            seed=seed,
+        )
+
+        if mock_blue_best is not None and len(mock_blue_best) > 0:
+            mock_blue_best = mock_blue_best.copy()
+            mock_blue_best["component"] = "blue"
+            mock_parts.append(mock_blue_best)
+
+    # Red component
+    red_weight = 1.0 - w_best
+
+    if red_weight > 0:
+
+        mock_red_best = make_and_eval_mock_pop2(
+            isoch,
+            fixed_age,
+            mets[1],
+            dmod=dmod,
+            log_mass=log_mass,
+            interp_mag_to_comp=interp_mag_to_comp,
+            bias_interp_814=bias_interp_814,
+            scatter_interp_814=scatter_interp_814,
+            bias_interp_606=bias_interp_606,
+            scatter_interp_606=scatter_interp_606,
+            smooth=smooth,
+            smooth_factor=smooth_factor,
+            weight=red_weight,
+            seed=seed + 1000,
+        )
+
+        if mock_red_best is not None and len(mock_red_best) > 0:
+            mock_red_best = mock_red_best.copy()
+            mock_red_best["component"] = "red"
+            mock_parts.append(mock_red_best)
+
+    if len(mock_parts) == 0:
+        return pd.DataFrame()
+
+    mock_composite_best = pd.concat(mock_parts, ignore_index=True)
+
+    return mock_composite_best
     
 
 ###### Running KDE  #########

@@ -199,28 +199,63 @@ def Find_TRGB(data_apt_clean, dwarf, box_coords=None, output=False):
     if output is True:
         return f606_rgb, f814_rgb #, ra_rgb, dec_rgb
 
+# def simple_cmd(data_apt_clean, f606_rgb, f814_rgb, ymin=22.0, ymax=28.0, xmin=-1.5, xmax=2.5):
+#     #real CMD
+#     plt.scatter(data_apt_clean['acs_f606w_vega'] - data_apt_clean['acs_f814w_vega'], 
+#             data_apt_clean['acs_f814w_vega'], c='blue', alpha=0.8, label='Observed Data', s=10)
+
+#     #Isolated RGB region
+#     plt.scatter(f606_rgb - f814_rgb, f814_rgb, c='red', alpha = 0.8, label='Selected Region', s= 10)
+
+#     #plot
+#     plt.ylim(ymin, ymax)
+#     plt.xlim(xmin, xmax)
+#     plt.gca().invert_yaxis()
+#     plt.xlabel('F606W - F814W')
+#     plt.ylabel('F814W')
+#     plt.title('CMD for Observed Data vs. Mock Population')
+#     plt.legend(loc='best')
+#     plt.show()
+
 def simple_cmd(data_apt_clean, f606_rgb, f814_rgb, ymin=22.0, ymax=28.0, xmin=-1.5, xmax=2.5):
-    #real CMD
-    plt.scatter(data_apt_clean['acs_f606w_vega'] - data_apt_clean['acs_f814w_vega'], 
-            data_apt_clean['acs_f814w_vega'], c='blue', alpha=0.8, label='Observed Data', s=10)
+    # Real CMD
+    fig, ax = plt.subplots(figsize=(8, 6))
 
-    #Isolated RGB region
-    plt.scatter(f606_rgb - f814_rgb, f814_rgb, c='red', alpha = 0.8, label='Selected Region', s= 10)
+    ax.scatter(
+        data_apt_clean["acs_f606w_vega"] - data_apt_clean["acs_f814w_vega"],
+        data_apt_clean["acs_f814w_vega"],
+        c="blue",
+        alpha=0.8,
+        label="Observed Data",
+        s=10
+    )
 
-    #plot
-    plt.ylim(ymin, ymax)
-    plt.xlim(xmin, xmax)
-    plt.gca().invert_yaxis()
-    plt.xlabel('F606W - F814W')
-    plt.ylabel('F814W')
-    plt.title('CMD for Observed Data vs. Mock Population')
-    plt.legend(loc='best')
-    plt.show()
+    # Isolated RGB region
+    ax.scatter(
+        f606_rgb - f814_rgb,
+        f814_rgb,
+        c="red",
+        alpha=0.8,
+        label="Selected RGB Region",
+        s=10
+    )
 
+    ax.set_ylim(ymin, ymax)
+    ax.set_xlim(xmin, xmax)
+    ax.invert_yaxis()
+    ax.set_xlabel("F606W - F814W")
+    ax.set_ylabel("F814W")
+    ax.set_title("CMD for Observed Data")
+    ax.legend(loc="best")
+
+    fig.tight_layout()
+
+    return fig, ax
+    
 def kde_2d(data_apt_clean, kind='kde', cmap='Blues'):
     '''
     Used to show the 2d Kernel Density Estimator for the potential TRGB. This should line up relatively 
-    with the position of the satellite, and helps to identify the slected box to draw. 
+    with the position of the satellite, and helps to identify the selected box to draw. 
 
     '''
     x = data_apt_clean['ra']
@@ -239,26 +274,37 @@ def kde_2d(data_apt_clean, kind='kde', cmap='Blues'):
 #def cmd_compare(f606_rgb, f814_rgb, mock_pop_with_obs_df, isoch, age=fixed_age, met=mets, 
 #                dmod=dmod, ymin = 22.0, ymax=28.0, xmin = -1.0, xmax = 2.5, name=dwarf):
 
-def cmd_compare(f606_rgb, f814_rgb, mock_pop_with_obs_df, isoch, age, mets, dwarf,
-                ymin = 23.0, ymax=28.2, xmin = -1.0, xmax = 2.5, s=8):
+def cmd_compare(f606_rgb, f814_rgb, mock_pop_with_obs_df, isoch, age, mets, dwarf, label_1 = 'Selected Region', 
+                label_2 = 'Mock Population', ymin = 23.0, ymax=28.2, xmin = -1.0, xmax = 2.5, s=8):
     
     fig, ax = plt.subplots(figsize=(8, 5))
     #real CMD
-    ax.scatter(f606_rgb - f814_rgb, f814_rgb, s=s, c='blue', label='Selected Region')
+    ax.scatter(f606_rgb - f814_rgb, f814_rgb, s=s, c='blue', label=label_1)
 
     #mock CMD
     ax.scatter(mock_pop_with_obs_df['F606W_obs'] - mock_pop_with_obs_df['F814W_obs'], mock_pop_with_obs_df['F814W_obs'], 
-            alpha=0.5, s=s, c='red', label = 'Mock Population')
+            alpha=0.5, s=s, c='red', label = label_2)
+    
+    # #isochrone
+    # cmdfilt = (isoch['logAge'] == age) & (isoch['MH'] == mets[0]) & (isoch['label'] < 9)
+    # w = isoch[cmdfilt]
+    # cmdfilt2 = (isoch['logAge'] == age) & (isoch['MH'] == mets[1]) & (isoch['label'] < 9)
+    # w2 = isoch[cmdfilt2]
+
     #isochrone
-    cmdfilt = (isoch['logAge'] == age) & (isoch['MH'] == mets[0]) & (isoch['label'] < 9)
+    cmdfilt = (isoch['logAge'] == age) & (isoch['MH'] == mets[0]) & (isoch['label'] == 3 )
     w = isoch[cmdfilt]
-    cmdfilt2 = (isoch['logAge'] == age) & (isoch['MH'] == mets[1]) & (isoch['label'] < 9)
+    cmdfilt2 = (isoch['logAge'] == age) & (isoch['MH'] == mets[1]) & (isoch['label'] == 3)
     w2 = isoch[cmdfilt2]
 
-    ax.scatter(w['F606Wmag'] - w['F814Wmag'], w['F814Wmag'] + dwarf.dmod, color='k', alpha = 0.9, s=s,
+    ax.plot(w['F606Wmag'] - w['F814Wmag'], w['F814Wmag'] + dwarf.dmod, color='k', alpha = 0.9,
             label = f'logage = {age}, [M/H] = {mets[0]}')
-    ax.scatter(w2['F606Wmag'] - w2['F814Wmag'], w2['F814Wmag'] + dwarf.dmod, color='purple', alpha = 0.9, s=s,
+    ax.plot(w2['F606Wmag'] - w2['F814Wmag'], w2['F814Wmag'] + dwarf.dmod, color='purple', alpha = 0.9,
             label = f'logage = {age}, [M/H] = {mets[1]}')
+    # ax.plot(w['F606Wmag'] - w['F814Wmag'], w['F814Wmag'] + dwarf.dmod, color='k', alpha = 0.9, s=s,
+    #         label = f'logage = {age}, [M/H] = {mets[0]}')
+    # ax.plot(w2['F606Wmag'] - w2['F814Wmag'], w2['F814Wmag'] + dwarf.dmod, color='purple', alpha = 0.9, s=s,
+    #         label = f'logage = {age}, [M/H] = {mets[1]}')
 
     #plot
     ax.set_ylim(ymin, ymax)
