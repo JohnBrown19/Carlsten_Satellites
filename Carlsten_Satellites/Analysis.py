@@ -270,8 +270,9 @@ def clean_asts(ast_apt):
     '''
     
     ast_apt = ast_apt[np.where((ast_apt['m606_in'] < 99.0) & (ast_apt['m814_in'] < 99.0)
-                           & (ast_apt['m606_out'] < 99.0) & (ast_apt['m814_out'] < 99.0))
-                     ]
+                           & (ast_apt['m606_out'] < 99.0) & (ast_apt['m814_out'] < 99.0)
+                              & (ast_apt['m814_in'] < 27.0) & (ast_apt['m606_in'] < 28.0)
+                              )]
     return ast_apt
     
 def median_pop(dataframe, notes = "", return_N = False):

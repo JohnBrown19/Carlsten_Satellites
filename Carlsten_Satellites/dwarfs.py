@@ -196,7 +196,7 @@ class Dwarf(object):
 
         return profile_map.get(profile, None)
 
-    # def load_asts(self):
+    # def load_asts(self): ##old tried and true
     #     ast_file = self.ast_path / f"17797_{self.name}_fakestars.dat"
 
     #     try:
@@ -215,18 +215,104 @@ class Dwarf(object):
     #         self.asts = ascii.read(fallback_file, names=self.ast_cols)
     #         print(f"Using AST data from {fallback_name}:")
     #         print(fallback_file)
-
+    # def load_asts(self):
+    #     """
+    #     Load raw ASTs only.
+    
+    #     Culling happens later in clean_asts().
+    #     """
+    
+    #     standard_exposure_cols = [
+    #         "m606_exp1_chip1",
+    #         "m606_exp1_chip2",
+    #         "m814_exp1_chip1",
+    #         "m814_exp1_chip2",
+    #         "m814_exp2_chip1",
+    #         "m814_exp2_chip2",
+    #         "m606_exp2_chip1",
+    #         "m606_exp2_chip2",
+    #     ]
+    
+    #     short_snap_exposure_cols = [
+    #         "m814_exp1_chip1",
+    #         "m814_exp1_chip2",
+    #         "m606_exp1_chip1",
+    #         "m606_exp1_chip2",
+    #         "m814_exp2_chip1",
+    #         "m814_exp2_chip2",
+    #     ]
+    
+    #     short_snap_names = {
+    #         "DW1234P3952",
+    #     }
+    
+    #     def get_column_names(dwarf_name):
+    #         dwarf_name_clean = str(dwarf_name).strip().upper()
+    
+    #         if dwarf_name_clean in short_snap_names:
+    #             ast_column_names = self.ast_cols + short_snap_exposure_cols
+    #             layout_name = "short-snap"
+    #         else:
+    #             ast_column_names = self.ast_cols + standard_exposure_cols
+    #             layout_name = "standard"
+    
+    #         return ast_column_names, layout_name
+    
+    #     def read_ast_file(ast_file, dwarf_name):
+    #         ast_column_names, layout_name = get_column_names(dwarf_name)
+    
+    #         ast_table = ascii.read(
+    #             str(ast_file),
+    #             names=ast_column_names,
+    #             # format="no_header",
+    #             # delimiter="\t",
+    #             # guess=False,
+    #             # fast_reader=False,
+    #         )
+    
+    #         return ast_table, layout_name
+    
+    #     ast_file = self.ast_path / f"17797_{self.name}_fakestars.dat"
+    
+    #     try:
+    #         self.asts, ast_layout = read_ast_file(ast_file, self.name)
+    #         self.sats_type = type(self.asts)
+    
+    #         print(f"Raw AST data for {self.name} loaded successfully.")
+    #         print(f"Layout: {ast_layout}")
+    #         print(f"File: {ast_file}")
+    #         print(f"Raw AST rows: {len(self.asts)}")
+    #         print(f"Raw AST columns: {len(self.asts.colnames)}")
+    
+    #     except Exception as error:
+    #         print(f"Could not load raw ASTs for {self.name}.")
+    #         print(f"Reason: {type(error).__name__}: {error}")
+    
+    #         fallback_name = "DW0846P3300"
+    #         fallback_file = (
+    #             self.ast_path
+    #             / f"17797_{fallback_name}_fakestars.dat"
+    #         )
+    
+    #         self.asts, fallback_layout = read_ast_file(
+    #             fallback_file,
+    #             fallback_name,
+    #         )
+    
+    #         self.sats_type = type(self.asts)
+    
+    #         print(f"Using fallback AST data from {fallback_name}.")
+    #         print(f"Layout: {fallback_layout}")
+    #         print(f"File: {fallback_file}")
+    #         print(f"Raw fallback AST rows: {len(self.asts)}")
+    #         print(f"Raw fallback AST columns: {len(self.asts.colnames)}")
     def load_asts(self):
         """
-        Load raw AST data for this dwarf.
+        Load raw ASTs only.
     
-        No science/quality culls are applied here. Those belong in cull_data().
-        Falls back to DW0846P3300 if this dwarf's AST file cannot be loaded.
+        Culling happens later in clean_asts().
         """
     
-        # --------------------------------------------------
-        # Extra columns appended after the 46 standard AST columns
-        # --------------------------------------------------
         standard_exposure_cols = [
             "m606_exp1_chip1",
             "m606_exp1_chip2",
@@ -247,91 +333,92 @@ class Dwarf(object):
             "m814_exp2_chip2",
         ]
     
-        # Add future short-snap targets here if needed.
         short_snap_names = {
             "DW1234P3952",
         }
     
-        def get_ast_column_names(dwarf_name):
-            """
-            Return the full AST column list appropriate for one dwarf.
-            """
+        def get_column_names(dwarf_name):
             dwarf_name_clean = str(dwarf_name).strip().upper()
     
             if dwarf_name_clean in short_snap_names:
-                extra_cols = short_snap_exposure_cols
+                ast_column_names = self.ast_cols + short_snap_exposure_cols
                 layout_name = "short-snap"
             else:
-                extra_cols = standard_exposure_cols
+                ast_column_names = self.ast_cols + standard_exposure_cols
                 layout_name = "standard"
     
-            return self.ast_cols + extra_cols, layout_name
+            return ast_column_names, layout_name
     
         def read_ast_file(ast_file, dwarf_name):
-            """
-            Read one AST file using the correct column layout.
-            """
-            ast_column_names, layout_name = get_ast_column_names(dwarf_name)
+            ast_column_names, layout_name = get_column_names(dwarf_name)
     
             ast_table = ascii.read(
                 str(ast_file),
                 names=ast_column_names,
-                format="no_header",
-                guess=False,
+                # format="no_header",
+                # delimiter="\t",
+                # guess=False,
+                # fast_reader=False,
             )
     
-            expected_ncols = len(ast_column_names)
-            actual_ncols = len(ast_table.colnames)
-    
-            if actual_ncols != expected_ncols:
-                raise ValueError(
-                    f"AST column-count mismatch for {dwarf_name}. "
-                    f"Expected {expected_ncols} columns for the {layout_name} layout, "
-                    f"but read {actual_ncols}."
-                )
-    
             return ast_table, layout_name
+
+        # --------------------------------------------------
+        # Candidate-specific AST substitutions
+        # --------------------------------------------------
+        ast_source_overrides = {
+            "DW1121P1411": "DW0241P3829",
+        }
+
+        requested_name = str(self.name).strip().upper()
+
+        ast_source_name = ast_source_overrides.get(
+            requested_name,
+            requested_name,
+        )
     
-        # --------------------------------------------------
-        # Try this dwarf's AST file first
-        # --------------------------------------------------
-        ast_file = self.ast_path / f"17797_{self.name}_fakestars.dat"
+        ast_file = self.ast_path / f"17797_{ast_source_name}_fakestars.dat"
     
         try:
-            self.asts, ast_layout = read_ast_file(ast_file, self.name)
+            self.asts, ast_layout = read_ast_file(
+                ast_file,
+                ast_source_name,
+            )
             self.sats_type = type(self.asts)
     
             print(f"Raw AST data for {self.name} loaded successfully.")
+            if ast_source_name != requested_name:
+                print(
+                    f"Using substitute ASTs from {ast_source_name} "
+                    f"for {requested_name}."
+                )
             print(f"Layout: {ast_layout}")
-            print(f"AST file: {ast_file}")
+            print(f"File: {ast_file}")
             print(f"Raw AST rows: {len(self.asts)}")
+            print(f"Raw AST columns: {len(self.asts.colnames)}")
     
         except Exception as error:
             print(f"Could not load raw ASTs for {self.name}.")
             print(f"Reason: {type(error).__name__}: {error}")
     
-            # --------------------------------------------------
-            # Fallback safety file
-            # --------------------------------------------------
             fallback_name = "DW0846P3300"
-            fallback_file = self.ast_path / f"17797_{fallback_name}_fakestars.dat"
+            fallback_file = (
+                self.ast_path
+                / f"17797_{fallback_name}_fakestars.dat"
+            )
     
-            try:
-                self.asts, fallback_layout = read_ast_file(
-                    fallback_file,
-                    fallback_name,
-                )
-                self.sats_type = type(self.asts)
+            self.asts, fallback_layout = read_ast_file(
+                fallback_file,
+                fallback_name,
+            )
     
-                print(f"Using fallback AST data from {fallback_name}.")
-                print(f"Layout: {fallback_layout}")
-                print(f"Fallback AST file: {fallback_file}")
-                print(f"Raw fallback AST rows: {len(self.asts)}")
+            self.sats_type = type(self.asts)
     
-            except Exception as fallback_error:
-                print(f"Fallback AST loading failed for {fallback_name}.")
-                print(f"Reason: {type(fallback_error).__name__}: {fallback_error}")
-                raise
+            print(f"Using fallback AST data from {fallback_name}.")
+            print(f"Layout: {fallback_layout}")
+            print(f"File: {fallback_file}")
+            print(f"Raw fallback AST rows: {len(self.asts)}")
+            print(f"Raw fallback AST columns: {len(self.asts.colnames)}")
             
     def load_data(self):
         # self.data = pd.read_hdf("./17797/fake-results2/17797_" + self.name 
@@ -367,7 +454,7 @@ class Dwarf(object):
 
     def clean_data(self):
         #1. Apply the photometric culls, extinction correction
-        self.data = cull_data(self.data) #apply photometric cuts as part of stap 2
+        self.data = cull_data(self.data, Data=True) #apply photometric cuts as part of stap 2
         self.data = extinction_correction(self.data) #wasn't in the file, but I need to do it anyway. 
         print(f"Applied the photometric culls, extinction correction to {self.name}")
 
