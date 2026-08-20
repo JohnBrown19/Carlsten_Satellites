@@ -185,6 +185,9 @@ def mock_stars_simple_pops_pd(isoch, logage=10.00, met=-1.0, mass=5e5,  minmass=
     # always define outtab as a DataFrame
     outtab = pd.DataFrame(columns=outputs)
 
+    if nstmax - nstmin <= 1.0:
+        return outtab
+
     if nstmax - nstmin > 1.0:
         #nst = (nstmax - nstmin) * np.random.random(size=int(nstmax - nstmin)) + nstmin
         nst = (nstmax - nstmin) * rng.random(size=int(nstmax - nstmin)) + nstmin
@@ -1176,7 +1179,7 @@ def make_and_eval_mock_pop2(isoch, fixed_age, met, dmod=29.74, log_mass=6.98, in
         # return empty series to match expected return type
         return pd.Series(dtype=float)
 
-def ks2_samp(sample1, sample2, direction='two-sided'):
+def ks2_samp(sample1, sample2, direction='two-sided', return_loc=False):
     s1 = np.asarray(sample1)
     s2 = np.asarray(sample2)
 
@@ -1184,11 +1187,23 @@ def ks2_samp(sample1, sample2, direction='two-sided'):
     mask1 = np.isfinite(s1); mask2 = np.isfinite(s2)
     s1_clean = s1[mask1]
     s2_clean = s2[mask2]
-    
-    D, p = stats.ks_2samp(s1_clean, s2_clean, alternative=direction)
-    print(f'D_KS = {D:.3e} & P_KS = {p:.3e}')
-    return D, p
-
+       
+    if return_loc:
+        result = stats.ks_2samp(s1_clean, s2_clean, alternative=direction)
+        
+        print(f'D_KS = {result.statistic:.3e} & P_KS = {result.pvalue:.3e}')
+        
+        D = result.statistic
+        p=result.pvalue
+        loc=result.statistic_location
+        
+        return D, p, loc
+    else:    
+        D, p = stats.ks_2samp(s1_clean, s2_clean, alternative=direction)
+        
+        print(f'D_KS = {D:.3e} & P_KS = {p:.3e}')
+        
+        return D, p
 
 #### Running One-One to find the best metallicity for the satellite  ######
 
@@ -1624,9 +1639,17 @@ def color_spread_weighting(
         "data_color": data_stars,
     }
 
-def Poisson_stats(expected_val, target_val):
-    p_val = poisson.sf(expected_val, target_val)
-    print(f"Probability of getting {target_val} stars from the expected background of {expected_val} stars using Poisson statistics = {p_val:.4e}")
+def Poisson_stats(target_val, expected_val):
+
+    p_val = poisson.sf(target_val - 1, expected_val)
+
+    print(
+        f"Probability of observing >= {target_val} stars "
+        f"given an expected background of "
+        f"{expected_val:.3f} stars = "
+        f"{p_val:.4e}"
+    )
+
     return p_val
 
 def pc_to_arcmin(radius_pc, distance_mpc):
@@ -2129,8 +2152,1903 @@ def make_best_weight_composite_mock(
     mock_composite_best = pd.concat(mock_parts, ignore_index=True)
 
     return mock_composite_best
-    
 
+#### Updates 7/29
+#### Changes for the AST_completness_table function to allow for a 
+
+def compute_ast_completeness_table2(
+    ast_apt,
+    bin_width=0.1,
+    mag_min=22.0,
+    mag_max=29.0,
+    return_interp=True,
+    color_min=None,
+    color_max=None,
+    color_col_606="m606_in",
+    color_col_814="m814_in",
+):
+    """
+    Computes AST completeness for both F606W and F814W bands,
+    optionally restricted to an injected color range.
+
+    Color is defined as:
+
+        color = m606_in - m814_in
+
+    Parameters
+    ----------
+    ast_apt : astropy.table or pandas DataFrame
+        Artificial star test table.
+    bin_width : float
+        Width of magnitude bins.
+    mag_min, mag_max : float
+        Magnitude bin limits.
+    return_interp : bool
+        If True, returns interpolation functions.
+    color_min, color_max : float or None
+        Optional color range. If None, no lower/upper limit is applied.
+    color_col_606, color_col_814 : str
+        Columns used to define injected AST color.
+
+    Returns
+    -------
+    completeness_table : astropy.table.Table
+    interp_funcs : dict, optional
+    interp_mag_to_comp : dict, optional
+    """
+
+    # Define shared bins and centers
+    bins = np.arange(mag_min, mag_max + bin_width, bin_width)
+    bin_centers = bins[:-1] + bin_width / 2
+
+    bands = {
+        "F606W": {"mag": "m606_in"},
+        "F814W": {"mag": "m814_in"},
+    }
+
+    # --------------------------------------------------
+    # Optional input-color selection
+    # --------------------------------------------------
+    ast_color = ast_apt[color_col_606] - ast_apt[color_col_814]
+
+    if color_min is None:
+        color_min = -np.inf
+
+    if color_max is None:
+        color_max = np.inf
+
+    in_color_range = (ast_color >= color_min) & (ast_color < color_max)
+
+    results = {
+        "mag_bin_center": bin_centers,
+        "bias_606": [],
+        "scatter_606": [],
+        "bias_814": [],
+        "scatter_814": [],
+    }
+
+    interp_funcs = {}
+    interp_mag_to_comp = {}
+
+    for band_name, band_info in bands.items():
+
+        mag_col = band_info["mag"]
+
+        completeness = []
+        bias = []
+        scatter = []
+
+        for i in range(len(bins) - 1):
+
+            # --------------------------------------------------
+            # Magnitude bin AND color range
+            # --------------------------------------------------
+            in_mag_bin = (
+                (ast_apt[mag_col] >= bins[i])
+                & (ast_apt[mag_col] < bins[i + 1])
+            )
+
+            in_bin = in_mag_bin & in_color_range
+
+            ast_inbin = ast_apt[in_bin]
+            N_injected = len(ast_inbin)
+
+            recovered = cull_data(ast_inbin, Data=False)
+            N_recovered = len(recovered)
+
+            completeness.append(
+                N_recovered / N_injected if N_injected > 0 else 0.0
+            )
+
+            # Compute bias and scatter for magnitude residuals
+            if N_recovered > 0:
+
+                if band_name == "F606W":
+                    delta_mag = recovered["m606_out"] - recovered["m606_in"]
+                else:
+                    delta_mag = recovered["m814_out"] - recovered["m814_in"]
+
+                bias.append(np.median(delta_mag))
+                scatter.append(
+                    1.4826 * np.median(
+                        np.abs(delta_mag - np.median(delta_mag))
+                    )
+                )
+
+            else:
+                bias.append(1e-8)
+                scatter.append(1e-8)
+
+        completeness = np.array(completeness)
+        bias = np.array(bias)
+        scatter = np.array(scatter)
+
+        valid = ~np.isnan(completeness)
+
+        mag_sorted = bin_centers[valid]
+        comp_sorted = completeness[valid]
+
+        sort_idx = np.argsort(comp_sorted)[::-1]
+        comp_sorted2 = comp_sorted[sort_idx]
+        mag_sorted2 = mag_sorted[sort_idx]
+
+        if band_name == "F606W":
+            results["completeness_606"] = completeness
+            results["bias_606"] = bias
+            results["scatter_606"] = scatter
+        else:
+            results["completeness_814"] = completeness
+            results["bias_814"] = bias
+            results["scatter_814"] = scatter
+
+        if return_interp:
+
+            # Inverse: completeness -> magnitude
+            comp_u, idx_u = np.unique(comp_sorted2, return_index=True)
+            mag_u = mag_sorted2[idx_u]
+
+            inv_interp_func = interp1d(
+                comp_u,
+                mag_u,
+                bounds_error=False,
+                fill_value=(mag_u[-1], mag_u[0]),
+            )
+
+            interp_funcs[band_name] = inv_interp_func
+
+            # Forward: magnitude -> completeness
+            comp_sorted = np.clip(comp_sorted, 0.0, 1.0)
+
+            # enforce monotonic non-increasing completeness with magnitude
+            comp_sorted = np.maximum.accumulate(comp_sorted[::-1])[::-1]
+
+            interp_func2 = interp1d(
+                mag_sorted,
+                comp_sorted,
+                bounds_error=False,
+                fill_value=(1.0, 0.0),
+            )
+
+            interp_mag_to_comp[band_name] = interp_func2
+
+    completeness_table = Table()
+
+    for key, val in results.items():
+        completeness_table[key] = val
+
+    # Useful metadata
+    completeness_table.meta["color_min"] = color_min
+    completeness_table.meta["color_max"] = color_max
+    completeness_table.meta["color_definition"] = f"{color_col_606} - {color_col_814}"
+
+    if return_interp:
+        return completeness_table, interp_funcs, interp_mag_to_comp
+    else:
+        return completeness_table
+
+
+# def draw_hierarchical_mass_mh(
+#     logMass,
+#     logMass_error,
+#     logMass_centers=None,
+#     n_realizations=100,
+#     alpha_fe=0.0,
+#     alpha_fe_error=0.0,
+#     relation_scatter=0.16,
+#     kirby_intercept=-1.69,
+#     kirby_intercept_error=0.04,
+#     kirby_slope=0.30,
+#     kirby_slope_error=0.02,
+#     kirby_intercept_draws=None,
+#     kirby_slope_draws=None,
+#     seed=None,
+# ):
+#     """
+#     Draw paired log stellar masses and mean metallicities for one dwarf.
+
+#     The same sampled log mass is used to normalize the SSP and to
+#     evaluate the Kirby mass-metallicity relation.
+
+#     Notes
+#     -----
+#     Keep relation_scatter=0.16 when logMass, slope, and intercept
+#     errors are explicitly sampled.
+
+#     Those contributions combine to produce the candidate-specific
+#     total predictive uncertainty, which is approximately 0.17 dex
+#     for logMass=7.0 +/- 0.1.
+#     """
+#     rng = np.random.default_rng(seed)
+
+#     logMass = float(logMass)
+
+#     # --------------------------------------------------
+#     # Candidate stellar-mass measurement
+#     # -------------------------------------------------- 
+#     if (
+#         np.isfinite(logMass_error)
+#         and float(logMass_error) > 0
+#         and logMass_centers is None
+#     ):
+#         sampled_log_masses = rng.normal(
+#             loc=logMass,
+#             scale=float(logMass_error),
+#             size=n_realizations,
+#             )
+
+#     else:
+#         sampled_log_mass = rng.normal(
+#             loc=np.asarray(logMass_centers, dtype=float),
+#             scale=logMass_error,
+#             size=n_realizations,
+#         )
+
+#     # --------------------------------------------------
+#     # Kirby intercept uncertainty
+#     # --------------------------------------------------
+#     if kirby_intercept_draws is None:
+#         sampled_kirby_intercepts = rng.normal(
+#             loc=kirby_intercept,
+#             scale=kirby_intercept_error,
+#             size=n_realizations,
+#         )
+
+#     else:
+#         sampled_kirby_intercepts = np.asarray(
+#             kirby_intercept_draws,
+#             dtype=float,
+#         )
+
+#         if (
+#             len(sampled_kirby_intercepts)
+#             != n_realizations
+#         ):
+#             raise ValueError(
+#                 "kirby_intercept_draws must have "
+#                 "length n_realizations."
+#             )
+
+#     # --------------------------------------------------
+#     # Kirby slope uncertainty
+#     # --------------------------------------------------
+#     if kirby_slope_draws is None:
+#         sampled_kirby_slopes = rng.normal(
+#             loc=kirby_slope,
+#             scale=kirby_slope_error,
+#             size=n_realizations,
+#         )
+
+#     else:
+#         sampled_kirby_slopes = np.asarray(
+#             kirby_slope_draws,
+#             dtype=float,
+#         )
+
+#         if (
+#             len(sampled_kirby_slopes)
+#             != n_realizations
+#         ):
+#             raise ValueError(
+#                 "kirby_slope_draws must have "
+#                 "length n_realizations."
+#             )
+
+#     # --------------------------------------------------
+#     # Residual scatter around the MZR
+#     # --------------------------------------------------
+#     sampled_relation_residuals = rng.normal(
+#         loc=0.0,
+#         scale=relation_scatter,
+#         size=n_realizations,
+#     )
+
+#     # --------------------------------------------------
+#     # Mean galaxy [Fe/H]
+#     # --------------------------------------------------
+#     sampled_feh_values = (
+#         sampled_kirby_intercepts
+#         + sampled_kirby_slopes
+#         * (sampled_log_masses - 6.0)
+#         + sampled_relation_residuals
+#     )
+
+#     # --------------------------------------------------
+#     # Alpha enhancement
+#     # --------------------------------------------------
+#     if (
+#         np.isfinite(alpha_fe_error)
+#         and float(alpha_fe_error) > 0
+#     ):
+#         sampled_alpha_fe_values = rng.normal(
+#             loc=alpha_fe,
+#             scale=float(alpha_fe_error),
+#             size=n_realizations,
+#         )
+
+#     else:
+#         sampled_alpha_fe_values = np.full(
+#             n_realizations,
+#             float(alpha_fe),
+#             dtype=float,
+#         )
+
+#     sampled_alpha_corrections = np.log10(
+#         0.638
+#         * 10.0**sampled_alpha_fe_values
+#         + 0.362
+#     )
+
+#     sampled_mh_values = (
+#         sampled_feh_values
+#         + sampled_alpha_corrections
+#     )
+
+#     return pd.DataFrame({
+#         "realization_index": np.arange(
+#             n_realizations,
+#             dtype=int,
+#         ),
+
+#         "sampled_log_mass": (
+#             sampled_log_masses
+#         ),
+
+#         "sampled_feh": (
+#             sampled_feh_values
+#         ),
+
+#         "sampled_mh_unclipped": (
+#             sampled_mh_values
+#         ),
+
+#         "sampled_alpha_fe": (
+#             sampled_alpha_fe_values
+#         ),
+
+#         "sampled_alpha_correction": (
+#             sampled_alpha_corrections
+#         ),
+
+#         "sampled_kirby_intercept": (
+#             sampled_kirby_intercepts
+#         ),
+
+#         "sampled_kirby_slope": (
+#             sampled_kirby_slopes
+#         ),
+
+#         "sampled_relation_residual": (
+#             sampled_relation_residuals
+#         ),
+#     })
+
+def draw_hierarchical_mass_mh(
+    logMass,
+    logMass_error,
+    logMass_centers=None,
+    n_realizations=100,
+    alpha_fe=0.0,
+    alpha_fe_error=0.0,
+    relation_scatter=0.16,
+    kirby_intercept=-1.69,
+    kirby_intercept_error=0.04,
+    kirby_slope=0.30,
+    kirby_slope_error=0.02,
+    kirby_intercept_draws=None,
+    kirby_slope_draws=None,
+    seed=None,
+):
+    """
+    Draw paired log stellar masses and mean metallicities for one dwarf.
+
+    If logMass_centers is None:
+        draw each realization around the catalog logMass.
+
+    If logMass_centers is supplied:
+        each realization is drawn around its corresponding
+        distance-adjusted log-mass center.
+
+    The same sampled log mass is then used both:
+        1. to normalize the SSP
+        2. to evaluate the Kirby mass-metallicity relation
+
+    Parameters
+    ----------
+    logMass : float
+        Catalog log10 stellar mass.
+
+    logMass_error : float
+        Residual uncertainty in log stellar mass.
+
+    logMass_centers : array-like or None
+        Optional realization-specific central log masses.
+        Must have length n_realizations.
+
+        For the distance-coupled analysis these are:
+
+            logMass
+            + 0.4 * (sampled_dmod - catalog_dmod)
+
+    n_realizations : int
+        Number of realizations.
+    """
+
+    rng = np.random.default_rng(seed)
+
+    logMass = float(logMass)
+
+    # --------------------------------------------------
+    # Validate mass error
+    # --------------------------------------------------
+
+    if (
+        logMass_error is not None
+        and np.isfinite(logMass_error)
+    ):
+        logMass_error_value = float(
+            logMass_error
+        )
+
+    else:
+        logMass_error_value = 0.0
+
+
+    # --------------------------------------------------
+    # Determine the central mass for each realization
+    # --------------------------------------------------
+
+    if logMass_centers is None:
+
+        # Old behavior:
+        # every realization centered on catalog mass.
+        mass_centers = np.full(
+            n_realizations,
+            logMass,
+            dtype=float,
+        )
+
+    else:
+
+        # New behavior:
+        # each realization has its own distance-adjusted center.
+        mass_centers = np.asarray(
+            logMass_centers,
+            dtype=float,
+        )
+
+        if mass_centers.ndim != 1:
+
+            raise ValueError(
+                "logMass_centers must be a "
+                "one-dimensional array."
+            )
+
+        if len(mass_centers) != n_realizations:
+
+            raise ValueError(
+                "logMass_centers must have length "
+                "n_realizations."
+            )
+
+        if not np.all(
+            np.isfinite(
+                mass_centers
+            )
+        ):
+
+            raise ValueError(
+                "logMass_centers contains "
+                "non-finite values."
+            )
+
+
+    # --------------------------------------------------
+    # Candidate stellar-mass measurement
+    #
+    # Draw around each realization-specific center.
+    # --------------------------------------------------
+
+    if logMass_error_value > 0:
+
+        sampled_log_masses = rng.normal(
+            loc=mass_centers,
+            scale=logMass_error_value,
+            size=n_realizations,
+        )
+
+    else:
+
+        # No residual mass uncertainty.
+        sampled_log_masses = (
+            mass_centers.copy()
+        )
+
+
+    # --------------------------------------------------
+    # Kirby intercept uncertainty
+    # --------------------------------------------------
+
+    if kirby_intercept_draws is None:
+
+        sampled_kirby_intercepts = rng.normal(
+            loc=kirby_intercept,
+            scale=kirby_intercept_error,
+            size=n_realizations,
+        )
+
+    else:
+
+        sampled_kirby_intercepts = np.asarray(
+            kirby_intercept_draws,
+            dtype=float,
+        )
+
+        if (
+            len(sampled_kirby_intercepts)
+            != n_realizations
+        ):
+
+            raise ValueError(
+                "kirby_intercept_draws must have "
+                "length n_realizations."
+            )
+
+
+    # --------------------------------------------------
+    # Kirby slope uncertainty
+    # --------------------------------------------------
+
+    if kirby_slope_draws is None:
+
+        sampled_kirby_slopes = rng.normal(
+            loc=kirby_slope,
+            scale=kirby_slope_error,
+            size=n_realizations,
+        )
+
+    else:
+
+        sampled_kirby_slopes = np.asarray(
+            kirby_slope_draws,
+            dtype=float,
+        )
+
+        if (
+            len(sampled_kirby_slopes)
+            != n_realizations
+        ):
+
+            raise ValueError(
+                "kirby_slope_draws must have "
+                "length n_realizations."
+            )
+
+
+    # --------------------------------------------------
+    # Residual scatter around the MZR
+    # --------------------------------------------------
+
+    sampled_relation_residuals = rng.normal(
+        loc=0.0,
+        scale=relation_scatter,
+        size=n_realizations,
+    )
+
+
+    # --------------------------------------------------
+    # Mean galaxy [Fe/H]
+    #
+    # IMPORTANT:
+    # This uses the SAME sampled mass that will later
+    # normalize the mock SSP.
+    # --------------------------------------------------
+
+    sampled_feh_values = (
+        sampled_kirby_intercepts
+        + sampled_kirby_slopes
+        * (
+            sampled_log_masses
+            - 6.0
+        )
+        + sampled_relation_residuals
+    )
+
+
+    # --------------------------------------------------
+    # Alpha enhancement
+    # --------------------------------------------------
+
+    if (
+        np.isfinite(alpha_fe_error)
+        and float(alpha_fe_error) > 0
+    ):
+
+        sampled_alpha_fe_values = rng.normal(
+            loc=alpha_fe,
+            scale=float(alpha_fe_error),
+            size=n_realizations,
+        )
+
+    else:
+
+        sampled_alpha_fe_values = np.full(
+            n_realizations,
+            float(alpha_fe),
+            dtype=float,
+        )
+
+
+    sampled_alpha_corrections = np.log10(
+        0.638
+        * 10.0**sampled_alpha_fe_values
+        + 0.362
+    )
+
+
+    sampled_mh_values = (
+        sampled_feh_values
+        + sampled_alpha_corrections
+    )
+
+
+    # --------------------------------------------------
+    # Return all realization-level quantities
+    # --------------------------------------------------
+
+    return pd.DataFrame({
+
+        "realization_index": np.arange(
+            n_realizations,
+            dtype=int,
+        ),
+
+        # Useful for auditing the new distance-mass coupling
+        "log_mass_center": (
+            mass_centers
+        ),
+
+        "sampled_log_mass": (
+            sampled_log_masses
+        ),
+
+        "sampled_feh": (
+            sampled_feh_values
+        ),
+
+        "sampled_mh_unclipped": (
+            sampled_mh_values
+        ),
+
+        "sampled_alpha_fe": (
+            sampled_alpha_fe_values
+        ),
+
+        "sampled_alpha_correction": (
+            sampled_alpha_corrections
+        ),
+
+        "sampled_kirby_intercept": (
+            sampled_kirby_intercepts
+        ),
+
+        "sampled_kirby_slope": (
+            sampled_kirby_slopes
+        ),
+
+        "sampled_relation_residual": (
+            sampled_relation_residuals
+        ),
+    })
+    
+def clip_and_match_mh_to_isochrone(
+    sampled_mh,
+    available_mh_grid,
+    mh_lower=-2.19,
+    mh_upper=-0.5,
+):
+    """
+    Clip sampled [M/H] to the analysis limits and select the
+    nearest metallicity actually present in the isochrone grid.
+
+    A sampled value below -2.19 is recorded as clipped to -2.19,
+    while the corresponding PARSEC grid row may be -2.19174.
+    """
+    sampled_mh = float(
+        sampled_mh
+    )
+
+    mh_clipped_low = (
+        sampled_mh < mh_lower
+    )
+
+    mh_clipped_high = (
+        sampled_mh > mh_upper
+    )
+
+    mh_was_clipped = (
+        mh_clipped_low
+        or mh_clipped_high
+    )
+
+    sampled_mh_clipped = float(
+        np.clip(
+            sampled_mh,
+            mh_lower,
+            mh_upper,
+        )
+    )
+
+    available_mh_grid = np.asarray(
+        available_mh_grid,
+        dtype=float,
+    )
+
+    available_mh_grid = np.sort(
+        np.unique(
+            available_mh_grid[
+                np.isfinite(
+                    available_mh_grid
+                )
+            ]
+        )
+    )
+
+    if len(available_mh_grid) == 0:
+        raise ValueError(
+            "No finite metallicities are available "
+            "in the isochrone grid."
+        )
+
+    nearest_index = int(
+        np.argmin(
+            np.abs(
+                available_mh_grid
+                - sampled_mh_clipped
+            )
+        )
+    )
+
+    selected_isochrone_mh = float(
+        available_mh_grid[
+            nearest_index
+        ]
+    )
+
+    return {
+        "sampled_mh_unclipped": (
+            sampled_mh
+        ),
+
+        "sampled_mh_clipped": (
+            sampled_mh_clipped
+        ),
+
+        "selected_isochrone_mh": (
+            selected_isochrone_mh
+        ),
+
+        "mh_was_clipped": bool(
+            mh_was_clipped
+        ),
+
+        "mh_clipped_low": bool(
+            mh_clipped_low
+        ),
+
+        "mh_clipped_high": bool(
+            mh_clipped_high
+        ),
+
+        "mh_grid_distance": float(
+            abs(
+                sampled_mh_clipped
+                - selected_isochrone_mh
+            )
+        ),
+    }
+
+
+def make_single_metallicity_mock(
+    isoch,
+    fixed_age,
+    mh,
+    dmod,
+    log_mass,
+    interp_mag_to_comp,
+    bias_interp_814,
+    scatter_interp_814,
+    bias_interp_606,
+    scatter_interp_606,
+    seed=7,
+    smooth=False,
+    smooth_factor=1.0,
+):
+    """
+    Generate one SSP with one age, one sampled log stellar mass,
+    and one sampled metallicity.
+    """
+    mock_population = make_and_eval_mock_pop2(
+        isoch,
+        fixed_age,
+        mh,
+
+        dmod=dmod,
+        log_mass=log_mass,
+
+        interp_mag_to_comp=(
+            interp_mag_to_comp
+        ),
+
+        bias_interp_814=(
+            bias_interp_814
+        ),
+
+        scatter_interp_814=(
+            scatter_interp_814
+        ),
+
+        bias_interp_606=(
+            bias_interp_606
+        ),
+
+        scatter_interp_606=(
+            scatter_interp_606
+        ),
+
+        smooth=smooth,
+        smooth_factor=smooth_factor,
+
+        weight=1.0,
+        seed=seed,
+    )
+
+    if (
+        mock_population is None
+        or len(mock_population) == 0
+    ):
+        return pd.DataFrame()
+
+    mock_population = (
+        mock_population.copy()
+    )
+
+    mock_population[
+        "component"
+    ] = "single_ssp"
+
+    mock_population[
+        "MH_component"
+    ] = mh
+
+    mock_population[
+        "weight_component"
+    ] = 1.0
+
+    required_columns = [
+        "F606W_obs",
+        "F814W_obs",
+    ]
+
+    if all(
+        column in mock_population.columns
+        for column in required_columns
+    ):
+        mock_population = (
+            mock_population
+            .dropna(
+                subset=required_columns
+            )
+            .copy()
+        )
+
+        mock_population[
+            "color_obs"
+        ] = (
+            mock_population[
+                "F606W_obs"
+            ]
+            - mock_population[
+                "F814W_obs"
+            ]
+        )
+
+    return mock_population
+
+#### Added functions to turnt he CDF from a bi-modal weighting from the high and low metallicity ends into 
+#### One that lokes at F = the sum of all (w_i * F_i) where the w_i and F_i ocrrespond to the weights and
+#### metallicities along my grid respectively
+
+def gaussian_metallicity_weights(
+    mh_grid,
+    mh_mean,
+    mh_sigma,
+):
+    """
+    Assign Gaussian probability mass to a discrete metallicity grid.
+
+    The first metallicity receives all probability below the midpoint
+    between grid[0] and grid[1].
+
+    The last metallicity receives all probability above the midpoint
+    between grid[-2] and grid[-1].
+
+    Therefore the weights sum to 1.
+    """
+
+    mh_grid_array = np.asarray(mh_grid, dtype=float)
+
+    if mh_sigma <= 0:
+        raise ValueError("mh_sigma must be > 0.")
+
+    if len(mh_grid_array) < 2:
+        raise ValueError("mh_grid must contain at least two metallicities.")
+
+    # Midpoints between neighboring metallicities
+    mh_midpoints = 0.5 * (
+        mh_grid_array[:-1] + mh_grid_array[1:]
+    )
+
+    mh_weights = np.zeros(
+        len(mh_grid_array),
+        dtype=float
+    )
+
+    # -----------------------------------------
+    # Blue edge:
+    # everything below first midpoint -> -2.2
+    # -----------------------------------------
+    mh_weights[0] = norm.cdf(
+        mh_midpoints[0],
+        loc=mh_mean,
+        scale=mh_sigma
+    )
+
+    # -----------------------------------------
+    # Interior metallicities
+    # -----------------------------------------
+    for i in range(1, len(mh_grid_array) - 1):
+
+        cdf_upper = norm.cdf(
+            mh_midpoints[i],
+            loc=mh_mean,
+            scale=mh_sigma
+        )
+
+        cdf_lower = norm.cdf(
+            mh_midpoints[i - 1],
+            loc=mh_mean,
+            scale=mh_sigma
+        )
+
+        mh_weights[i] = cdf_upper - cdf_lower
+
+    # -----------------------------------------
+    # Red edge:
+    # everything above final midpoint -> -0.5
+    # -----------------------------------------
+    mh_weights[-1] = norm.sf(
+        mh_midpoints[-1],
+        loc=mh_mean,
+        scale=mh_sigma
+    )
+
+    # Floating-point protection only.
+    # Mathematically these already sum to 1.
+    mh_weights = mh_weights / np.sum(mh_weights)
+
+    weight_table = pd.DataFrame({
+        "MH": mh_grid_array,
+        "weight": mh_weights,
+    })
+
+    return mh_weights, weight_table
+
+def color_spread_gaussian_weighting(
+    isoch,
+    data_color,
+    interp_mag_to_comp,
+    bias_interp_814,
+    scatter_interp_814,
+    bias_interp_606,
+    scatter_interp_606,
+    dmod,
+    log_mass,
+    mh_mean,
+    mh_sigma,
+    fixed_age=9.9,
+    mh_grid=None,
+    smooth=False,
+    smooth_factor=1.e1,
+    seed=None,
+    make_plots=True,
+):
+    """
+    Build a Gaussian-weighted metallicity mixture CDF.
+
+    Unlike color_spread_weighting(), there is no optimization over a
+    free blue/red mixture weight. The metallicity weights are fixed
+    by a Gaussian MDF centered at mh_mean with width mh_sigma.
+    """
+
+    start_time = time.time()
+
+    if mh_grid is None:
+        mh_grid = np.round(
+            np.arange(-2.2, -0.5 + 0.05, 0.1),
+            1
+        )
+
+    mh_grid_array = np.asarray(
+        mh_grid,
+        dtype=float
+    )
+
+    # --------------------------------------------------
+    # 1. Gaussian mass fractions
+    # --------------------------------------------------
+
+    mh_weights, weight_table = gaussian_metallicity_weights(
+        mh_grid=mh_grid_array,
+        mh_mean=mh_mean,
+        mh_sigma=mh_sigma,
+    )
+
+    print(
+        f"Gaussian metallicity distribution:"
+        f" mean={mh_mean:.3f}, sigma={mh_sigma:.3f}"
+    )
+
+    print(
+        f"Sum of metallicity weights = "
+        f"{mh_weights.sum():.10f}"
+    )
+
+    # --------------------------------------------------
+    # 2. Target population
+    # --------------------------------------------------
+
+    data_stars = np.sort(
+        np.asarray(
+            data_color,
+            dtype=float
+        )
+    )
+
+    data_stars = data_stars[
+        np.isfinite(data_stars)
+    ]
+
+    if len(data_stars) < 2:
+        raise ValueError(
+            "data_color has <2 finite values."
+        )
+
+    # Unique values are safer for interp1d
+    x_grid = np.unique(data_stars)
+
+    F_data_on_grid = ecdf_on_grid(
+        data_stars,
+        x_grid
+    )
+
+    # --------------------------------------------------
+    # 3. Construct every metallicity CDF
+    # --------------------------------------------------
+
+    component_cdfs = []
+    component_colors = {}
+    component_N_cdf = []
+
+    for i, mh_value in enumerate(mh_grid_array):
+
+        print(
+            f"Building CDF component "
+            f"{i + 1}/{len(mh_grid_array)}: "
+            f"[M/H]={mh_value:.2f}"
+        )
+
+        component_seed = (
+            None
+            if seed is None
+            else seed + 1000 * i
+        )
+
+        # IMPORTANT:
+        # weight=1.0 here.
+        #
+        # We want a well-sampled normalized CDF SHAPE,
+        # not the actual small-mass realization yet.
+        component_color = make_and_eval_mock_pop(
+            isoch,
+            fixed_age,
+            mh_value,
+            dmod=dmod,
+            log_mass=log_mass,
+            interp_mag_to_comp=interp_mag_to_comp,
+            bias_interp_814=bias_interp_814,
+            scatter_interp_814=scatter_interp_814,
+            bias_interp_606=bias_interp_606,
+            scatter_interp_606=scatter_interp_606,
+            smooth=smooth,
+            smooth_factor=smooth_factor,
+            weight=1.0,
+            seed=component_seed,
+        )
+
+        component_stars = np.asarray(
+            component_color,
+            dtype=float
+        )
+
+        component_stars = np.sort(
+            component_stars[
+                np.isfinite(component_stars)
+            ]
+        )
+
+        component_N_cdf.append(
+            len(component_stars)
+        )
+
+        component_colors[mh_value] = (
+            component_stars
+        )
+
+        if len(component_stars) < 2:
+            raise ValueError(
+                f"[M/H]={mh_value:.2f} produced "
+                f"{len(component_stars)} usable stars "
+                "for its CDF. This component CDF "
+                "cannot be estimated reliably."
+            )
+
+        F_component = ecdf_on_grid(
+            component_stars,
+            x_grid
+        )
+
+        component_cdfs.append(
+            F_component
+        )
+
+    component_cdfs_array = np.asarray(
+        component_cdfs
+    )
+
+    # shape:
+    #
+    # (N_metallicities, N_x_grid)
+
+    # --------------------------------------------------
+    # 4. Gaussian-weighted system CDF
+    # --------------------------------------------------
+
+    F_system = np.sum(
+        mh_weights[:, None]
+        * component_cdfs_array,
+        axis=0
+    )
+
+    # --------------------------------------------------
+    # 5. KS comparison to the continuous mixture CDF
+    # --------------------------------------------------
+
+    Fsystem_callable = interp1d(
+        x_grid,
+        F_system,
+        bounds_error=False,
+        fill_value=(0.0, 1.0),
+        assume_sorted=True,
+    )
+
+    ks_result = stats.kstest(
+        data_stars,
+        Fsystem_callable,
+        alternative="two-sided",
+        mode="auto",
+    )
+
+    D_gaussian = ks_result.statistic
+    p_gaussian = ks_result.pvalue
+    loc_gaussian = ks_result.statistic_location
+    sign_gaussian = ks_result.statistic_sign
+
+    print(
+        f"Gaussian-mixture KS D = "
+        f"{D_gaussian:.4f}"
+    )
+
+    print(
+        f"Gaussian-mixture KS p = "
+        f"{p_gaussian:.4e}"
+    )
+
+    # --------------------------------------------------
+    # 6. Add CDF sampling counts to weight table
+    # --------------------------------------------------
+
+    weight_table["N_CDF_stars"] = (
+        component_N_cdf
+    )
+
+    # --------------------------------------------------
+    # 7. Preserve your existing style of CDF plot
+    # --------------------------------------------------
+
+    figs = {}
+
+    if make_plots:
+
+        fig_cdf, ax_cdf = plt.subplots(
+            figsize=(8, 6)
+        )
+
+        # Target CDF
+        ax_cdf.plot(
+            x_grid,
+            F_data_on_grid,
+            "k-",
+            lw=2.5,
+            label="Target CDF",
+        )
+
+        # Final Gaussian-weighted CDF
+        ax_cdf.plot(
+            x_grid,
+            F_system,
+            "r-",
+            lw=2.5,
+            label=(
+                "Gaussian-weighted CDF\n"
+                rf"$\mu_{{[M/H]}}={mh_mean:.2f}$, "
+                rf"$\sigma_{{[M/H]}}={mh_sigma:.2f}$"
+            ),
+        )
+
+        # Preserve your original blue endpoint
+        ax_cdf.plot(
+            x_grid,
+            component_cdfs_array[0],
+            "--",
+            lw=2,
+            label=(
+                f"Blue edge: "
+                f"[M/H]={mh_grid_array[0]:.2f}"
+            ),
+        )
+
+        # Preserve your original red endpoint
+        ax_cdf.plot(
+            x_grid,
+            component_cdfs_array[-1],
+            "--",
+            lw=2,
+            label=(
+                f"Red edge: "
+                f"[M/H]={mh_grid_array[-1]:.2f}"
+            ),
+        )
+
+        # --------------------------------------------------
+        # KS vertical separation
+        # --------------------------------------------------
+
+        F_data_at_loc = (
+            np.searchsorted(
+                data_stars,
+                loc_gaussian,
+                side="right",
+            )
+            / len(data_stars)
+        )
+
+        F_model_at_loc = float(
+            Fsystem_callable(
+                loc_gaussian
+            )
+        )
+
+        ax_cdf.vlines(
+            loc_gaussian,
+            min(
+                F_data_at_loc,
+                F_model_at_loc
+            ),
+            max(
+                F_data_at_loc,
+                F_model_at_loc
+            ),
+            color="black",
+            linestyle=":",
+            linewidth=2,
+        )
+
+        ax_cdf.set(
+            xlabel="Color (F606W - F814W)",
+            ylabel="CDF",
+            title=(
+                "Gaussian metallicity-spread "
+                "CDF vs. target"
+            ),
+        )
+
+        ax_cdf.annotate(
+            f"D = {D_gaussian:.3f}\n"
+            f"p = {p_gaussian:.3e}",
+            xy=(0.03, 0.72),
+            xycoords="axes fraction",
+            fontsize=12,
+        )
+
+        ax_cdf.legend()
+        ax_cdf.grid(alpha=0.25)
+
+        fig_cdf.tight_layout()
+
+        figs["gaussian_cdf"] = fig_cdf
+
+    print(
+        "execution time = "
+        f"{time.time() - start_time:.3f} seconds"
+    )
+
+    return {
+        "mh_grid": mh_grid_array,
+        "mh_weights": mh_weights,
+        "weight_table": weight_table,
+        "component_cdfs": component_cdfs_array,
+        "component_colors": component_colors,
+        "x_grid": x_grid,
+        "F_data": F_data_on_grid,
+        "F_system": F_system,
+        "D_gaussian": D_gaussian,
+        "p_gaussian": p_gaussian,
+        "loc_gaussian": loc_gaussian,
+        "sign_gaussian": sign_gaussian,
+        "figures": figs,
+    }
+
+def make_gaussian_weighted_composite_mock(
+    isoch,
+    fixed_age,
+    mh_grid,
+    mh_weights,
+    dmod,
+    log_mass,
+    interp_mag_to_comp,
+    bias_interp_814,
+    scatter_interp_814,
+    bias_interp_606,
+    scatter_interp_606,
+    seed=7,
+    smooth=False,
+    smooth_factor=1.0,
+):
+    """
+    Generate the actual finite-mass mock stellar population
+    using the Gaussian metallicity weights.
+    """
+
+    mock_parts = []
+    population_rows = []
+
+    candidate_mass = 10**log_mass
+
+    for i, (mh_value, mh_weight) in enumerate(
+        zip(mh_grid, mh_weights)
+    ):
+
+        component_mass = (
+            candidate_mass
+            * mh_weight
+        )
+
+        component_seed = (
+            None
+            if seed is None
+            else seed + 1000 * i
+        )
+
+        print(
+            f"[M/H]={mh_value:.2f}: "
+            f"weight={mh_weight:.5f}, "
+            f"mass={component_mass:.3e} Msun"
+        )
+
+        # -----------------------------------------
+        # Default values in case no stars appear
+        # -----------------------------------------
+
+        N_generated = 0
+        N_recovered = 0
+
+        # There is no reason to run a component whose
+        # floating-point weight is exactly zero.
+        if (
+            mh_weight <= 0
+            or component_mass < 0.55
+        ):
+        
+            population_rows.append({
+                "MH": mh_value,
+                "weight": mh_weight,
+                "component_mass": component_mass,
+                "N_generated": 0,
+                "N_recovered": 0,
+            })
+        
+            print(
+                f"  Component mass too small to generate stars "
+                f"for [M/H]={mh_value:.2f}. Continuing."
+            )
+        
+            continue
+
+        mock_component = make_and_eval_mock_pop2(
+            isoch,
+            fixed_age,
+            mh_value,
+            dmod=dmod,
+            log_mass=log_mass,
+            interp_mag_to_comp=interp_mag_to_comp,
+            bias_interp_814=bias_interp_814,
+            scatter_interp_814=scatter_interp_814,
+            bias_interp_606=bias_interp_606,
+            scatter_interp_606=scatter_interp_606,
+            smooth=smooth,
+            smooth_factor=smooth_factor,
+            weight=mh_weight,
+            seed=component_seed,
+        )
+
+        # -----------------------------------------
+        # Gracefully handle empty components
+        # -----------------------------------------
+
+        if (
+            mock_component is None
+            or not isinstance(
+                mock_component,
+                pd.DataFrame
+            )
+            or len(mock_component) == 0
+        ):
+
+            print(
+                f"  No stars generated for "
+                f"[M/H]={mh_value:.2f}. "
+                "Continuing."
+            )
+
+            population_rows.append({
+                "MH": mh_value,
+                "weight": mh_weight,
+                "component_mass": component_mass,
+                "N_generated": 0,
+                "N_recovered": 0,
+            })
+
+            continue
+
+        mock_component = (
+            mock_component.copy()
+        )
+
+        N_generated = len(
+            mock_component
+        )
+
+        recovered_mask = (
+            mock_component["F606W_obs"].notna()
+            & mock_component["F814W_obs"].notna()
+        )
+
+        N_recovered = int(
+            recovered_mask.sum()
+        )
+
+        mock_component[
+            "MH_component"
+        ] = mh_value
+
+        mock_component[
+            "weight_component"
+        ] = mh_weight
+
+        mock_component[
+            "component_mass"
+        ] = component_mass
+
+        mock_parts.append(
+            mock_component
+        )
+
+        population_rows.append({
+            "MH": mh_value,
+            "weight": mh_weight,
+            "component_mass": component_mass,
+            "N_generated": N_generated,
+            "N_recovered": N_recovered,
+        })
+
+    # --------------------------------------------------
+    # Combine everything that actually generated stars
+    # --------------------------------------------------
+
+    if len(mock_parts) > 0:
+
+        mock_composite = pd.concat(
+            mock_parts,
+            ignore_index=True,
+        )
+
+        mock_composite["color_obs"] = (
+            mock_composite["F606W_obs"]
+            - mock_composite["F814W_obs"]
+        )
+
+    else:
+
+        mock_composite = pd.DataFrame()
+
+    population_table = pd.DataFrame(
+        population_rows
+    )
+
+    return (
+        mock_composite,
+        population_table,
+    )
+
+####Gaussian grid helper function
+
+def build_metallicity_component_cdfs(
+    isoch,
+    data_color,
+    interp_mag_to_comp,
+    bias_interp_814,
+    scatter_interp_814,
+    bias_interp_606,
+    scatter_interp_606,
+    dmod,
+    log_mass,
+    fixed_age,
+    mh_grid,
+    smooth=True,
+    smooth_factor=10.0,
+    seed=None,
+):
+    """
+    Build one smooth mock color CDF for every metallicity
+    in mh_grid.
+
+    These component CDFs depend on the dwarf, ASTs, age,
+    distance, and metallicity grid, but NOT on the assumed
+    Gaussian MDF mean or sigma.
+
+    Therefore they only need to be generated once per dwarf.
+    """
+
+    # --------------------------------------------------
+    # Clean observed color sample
+    # --------------------------------------------------
+
+    data_stars = np.asarray(
+        data_color,
+        dtype=float,
+    )
+
+    data_stars = data_stars[
+        np.isfinite(data_stars)
+    ]
+
+    data_stars = np.sort(
+        data_stars
+    )
+
+    if len(data_stars) < 2:
+        raise ValueError(
+            "Need at least two observed stars "
+            "to construct the CDF grid."
+        )
+
+
+    # Use unique observed colors as evaluation grid
+    x_grid = np.unique(
+        data_stars
+    )
+
+
+    # --------------------------------------------------
+    # Build individual metallicity CDFs
+    # --------------------------------------------------
+
+    component_cdfs = []
+    component_colors = []
+    component_rows = []
+
+
+    for i, mh in enumerate(mh_grid):
+
+        print(
+            f"Building CDF component "
+            f"{i + 1}/{len(mh_grid)}: "
+            f"[M/H]={mh:.2f}"
+        )
+
+
+        component_seed = (
+            None
+            if seed is None
+            else seed + 1000 * i
+        )
+
+
+        # IMPORTANT:
+        # weight=1.0 because these are normalized
+        # CDF SHAPES, not physical mass allocations.
+        mock_color = make_and_eval_mock_pop(
+            isoch,
+            fixed_age,
+            mh,
+
+            dmod=dmod,
+            log_mass=log_mass,
+
+            interp_mag_to_comp=
+                interp_mag_to_comp,
+
+            bias_interp_814=
+                bias_interp_814,
+
+            scatter_interp_814=
+                scatter_interp_814,
+
+            bias_interp_606=
+                bias_interp_606,
+
+            scatter_interp_606=
+                scatter_interp_606,
+
+            smooth=smooth,
+            smooth_factor=smooth_factor,
+
+            weight=1.0,
+
+            seed=component_seed,
+        )
+
+
+        mock_color = np.asarray(
+            mock_color,
+            dtype=float,
+        )
+
+        mock_color = mock_color[
+            np.isfinite(mock_color)
+        ]
+
+        mock_color = np.sort(
+            mock_color
+        )
+
+
+        if len(mock_color) < 2:
+
+            raise ValueError(
+                f"Not enough stars to construct "
+                f"CDF for [M/H]={mh:.2f}. "
+                f"N={len(mock_color)}"
+            )
+
+
+        F_component = ecdf_on_grid(
+            mock_color,
+            x_grid,
+        )
+
+
+        component_cdfs.append(
+            F_component
+        )
+
+        component_colors.append(
+            mock_color
+        )
+
+        component_rows.append({
+            "MH": float(mh),
+            "N_CDF_stars": len(mock_color),
+        })
+
+
+    # shape:
+    # (N_metallicities, N_x_grid)
+    component_cdfs = np.asarray(
+        component_cdfs,
+        dtype=float,
+    )
+
+
+    component_table = pd.DataFrame(
+        component_rows
+    )
+
+
+    return {
+        "x_grid": x_grid,
+        "data_stars": data_stars,
+        "component_cdfs": component_cdfs,
+        "component_colors": component_colors,
+        "component_table": component_table,
+        "mh_grid": np.asarray(
+            mh_grid,
+            dtype=float,
+        ),
+    }
+
+def evaluate_gaussian_cdf_from_components(
+    component_result,
+    mh_mean,
+    mh_sigma,
+):
+    """
+    Combine previously generated metallicity-component CDFs
+    using Gaussian MDF weights, then compare the resulting
+    model CDF to the observed colors.
+
+    This is intentionally fast: no new stars or AST
+    realizations are generated here.
+    """
+
+    mh_grid = np.asarray(
+        component_result["mh_grid"],
+        dtype=float,
+    )
+
+    component_cdfs = np.asarray(
+        component_result["component_cdfs"],
+        dtype=float,
+    )
+
+    x_grid = np.asarray(
+        component_result["x_grid"],
+        dtype=float,
+    )
+
+    data_stars = np.asarray(
+        component_result["data_stars"],
+        dtype=float,
+    )
+
+
+    # --------------------------------------------------
+    # Gaussian metallicity weights
+    # --------------------------------------------------
+
+    (
+        mh_weights,
+        weight_table,
+    ) = gaussian_metallicity_weights(
+        mh_grid=mh_grid,
+        mh_mean=mh_mean,
+        mh_sigma=mh_sigma,
+    )
+
+
+    # --------------------------------------------------
+    # Weighted composite CDF
+    #
+    # component_cdfs:
+    #     shape = (N_MH, N_color)
+    #
+    # mh_weights:
+    #     shape = (N_MH,)
+    # --------------------------------------------------
+
+    F_gaussian = np.sum(
+        mh_weights[:, None]
+        * component_cdfs,
+        axis=0,
+    )
+
+
+    # Numerical protection
+    F_gaussian = np.clip(
+        F_gaussian,
+        0.0,
+        1.0,
+    )
+
+
+    # --------------------------------------------------
+    # Make callable CDF for scipy kstest
+    # --------------------------------------------------
+
+    F_gaussian_callable = interp1d(
+        x_grid,
+        F_gaussian,
+
+        bounds_error=False,
+
+        fill_value=(
+            0.0,
+            1.0,
+        ),
+
+        assume_sorted=True,
+    )
+
+
+    ks_result = stats.kstest(
+        data_stars,
+        F_gaussian_callable,
+
+        alternative="two-sided",
+        mode="auto",
+    )
+
+
+    D_gaussian = float(
+        ks_result.statistic
+    )
+
+    p_gaussian = float(
+        ks_result.pvalue
+    )
+
+
+    loc_gaussian = getattr(
+        ks_result,
+        "statistic_location",
+        np.nan,
+    )
+
+
+    if np.isfinite(loc_gaussian):
+        loc_gaussian = float(
+            loc_gaussian
+        )
+
+
+    return {
+        "mh_mean": float(mh_mean),
+        "mh_sigma": float(mh_sigma),
+
+        "mh_grid": mh_grid,
+        "mh_weights": mh_weights,
+
+        "weight_table": weight_table,
+
+        "x_grid": x_grid,
+        "F_gaussian": F_gaussian,
+
+        "D_gaussian": D_gaussian,
+        "p_gaussian": p_gaussian,
+        "loc_gaussian": loc_gaussian,
+    }
+
+    
 ###### Running KDE  #########
 #####Based on Code I used for Completeing Umich Astro 406 course #####
 

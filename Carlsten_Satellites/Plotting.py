@@ -277,6 +277,7 @@ def kde_2d(data_apt_clean, kind='kde', cmap='Blues'):
 def cmd_compare(f606_rgb, f814_rgb, mock_pop_with_obs_df, isoch, age, mets, dwarf, label_1 = 'Selected Region', 
                 label_2 = 'Mock Population', ymin = 23.0, ymax=28.2, xmin = -1.0, xmax = 2.5, s=8):
     
+    #fig, ax = plt.subplots(figsize=(8, 5))
     fig, ax = plt.subplots(figsize=(8, 5))
     #real CMD
     ax.scatter(f606_rgb - f814_rgb, f814_rgb, s=s, c='blue', label=label_1)
@@ -331,53 +332,205 @@ def ks2_samp(data_color, mock_pop_color, direction='two-sided'):
     print(f'D_KS = {D:.3e} & P_KS = {p:.3e}')
     return D, p
     
-def cdf_compare(data_color, mock_pop_color, dwarf):
-    '''
-    Compare the CDF of my data against my mock_population using the 2 sample ks-test
+# def cdf_compare(data_color, mock_pop_color, dwarf):
+#     '''
+#     Compare the CDF of my data against my mock_population using the 2 sample ks-test
 
-    Parameters
-    ----------
+#     Parameters
+#     ----------
 
-    Returns
-    -------
-    '''
-    ### check for non-zero data
-    if len(data_color) == 0 or len(mock_pop_color) == 0:
-        raise ValueError("data_color and mock_pop_color must both contain finite values.")
+#     Returns
+#     -------
+#     '''
+#     ### check for non-zero data
+#     if len(data_color) == 0 or len(mock_pop_color) == 0:
+#         raise ValueError("data_color and mock_pop_color must both contain finite values.")
         
-    #run 2-sample ks test
-    D, p = stats.ks_2samp(data_color, mock_pop_color, nan_policy='omit')
+#     #run 2-sample ks test
+#     D, p = stats.ks_2samp(data_color, mock_pop_color, nan_policy='omit')
 
-    #set_up the ecdf to plot like in the documentation
-    fig, ax = plt.subplots(figsize=(10,5))
+#     #set_up the ecdf to plot like in the documentation
+#     fig, ax = plt.subplots(figsize=(10,5))
 
-    #data
-    ecdf_input = stats.ecdf(data_color)
+#     #data
+#     ecdf_input = stats.ecdf(data_color)
 
-    #mock pop
-    ecdf_output = stats.ecdf(mock_pop_color)
+#     #mock pop
+#     ecdf_output = stats.ecdf(mock_pop_color)
 
-    textplacement = min(np.nanmin(data_color), np.nanmin(mock_pop_color))
+#     textplacement = min(np.nanmin(data_color), np.nanmin(mock_pop_color))
 
-    #plot
-    ecdf_input.cdf.plot(ax, label='Satellite RGB', color='blue')
-    ecdf_output.cdf.plot(ax, label = 'Mock Population', color='red')
-    ax.set(
-        xlabel="Color",
-        ylabel="CDF",
-        title=f"{dwarf.name} CDF for RGB vs. Drawn Population"
-    )
-    # ax.set_xlabel("Color")
-    # ax.set_ylabel("CDF")
-    # ax.title(dwarf.name + " CDF for RGB vs. Drawn Population")
-    ax.annotate(f'Distance = {D:.3f}', (textplacement -.2, 0.85), fontsize=12)
-    ax.annotate(f'p-value = {p:.3e}', (textplacement -.2, 0.8), fontsize=12)
+#     #plot
+#     ecdf_input.cdf.plot(ax, label='Satellite RGB', color='blue')
+#     ecdf_output.cdf.plot(ax, label = 'Mock Population', color='red')
+#     ax.set(
+#         xlabel="Color",
+#         ylabel="CDF",
+#         title=f"{dwarf.name} CDF for RGB vs. Drawn Population"
+#     )
+#     # ax.set_xlabel("Color")
+#     # ax.set_ylabel("CDF")
+#     # ax.title(dwarf.name + " CDF for RGB vs. Drawn Population")
+#     ax.annotate(f'Distance = {D:.3f}', (textplacement -.2, 0.85), fontsize=12)
+#     ax.annotate(f'p-value = {p:.3e}', (textplacement -.2, 0.8), fontsize=12)
     
+#     ax.legend()
+#     fig.tight_layout()
+#     #plt.show()
+
+#     return fig, ax, D, p
+
+def cdf_compare(data_color, mock_pop_color, dwarf):
+    """
+    Plot two empirical CDFs and mark the location of their
+    greatest vertical separation from a two-sample KS test.
+    """
+    data_color = np.asarray(data_color, dtype=float)
+    mock_pop_color = np.asarray(mock_pop_color, dtype=float)
+
+    # Remove non-finite values
+    data_color = data_color[np.isfinite(data_color)]
+    mock_pop_color = mock_pop_color[np.isfinite(mock_pop_color)]
+
+    if len(data_color) == 0 or len(mock_pop_color) == 0:
+        raise ValueError(
+            "data_color and mock_pop_color must both "
+            "contain finite values."
+        )
+
+    # --------------------------------------------------
+    # Two-sample KS test
+    # --------------------------------------------------
+    result = stats.ks_2samp(
+        data_color,
+        mock_pop_color,
+        alternative="two-sided",
+        method="auto",
+    )
+
+    D = result.statistic
+    p = result.pvalue
+    ks_location = result.statistic_location
+    ks_sign = result.statistic_sign
+
+    # --------------------------------------------------
+    # ECDF values at the KS location
+    # --------------------------------------------------
+    # ECDF(x) = number of observations <= x / sample size
+    data_cdf_at_loc = (
+        np.searchsorted(
+            np.sort(data_color),
+            ks_location,
+            side="right",
+        )
+        / len(data_color)
+    )
+
+    mock_cdf_at_loc = (
+        np.searchsorted(
+            np.sort(mock_pop_color),
+            ks_location,
+            side="right",
+        )
+        / len(mock_pop_color)
+    )
+
+    # --------------------------------------------------
+    # Plot
+    # --------------------------------------------------
+    fig, ax = plt.subplots(
+        figsize=(10, 5)
+    )
+
+    ecdf_input = stats.ecdf(
+        data_color
+    )
+
+    ecdf_output = stats.ecdf(
+        mock_pop_color
+    )
+
+    ecdf_input.cdf.plot(
+        ax,
+        label="Satellite RGB",
+        color="blue",
+    )
+
+    ecdf_output.cdf.plot(
+        ax,
+        label="Mock Population",
+        color="red",
+    )
+
+    # Vertical segment showing the actual KS distance
+    ax.vlines(
+        x=ks_location,
+        ymin=min(
+            data_cdf_at_loc,
+            mock_cdf_at_loc,
+        ),
+        ymax=max(
+            data_cdf_at_loc,
+            mock_cdf_at_loc,
+        ),
+        color="black",
+        linestyle="--",
+        linewidth=2,
+        label=rf"Maximum CDF separation: $D={D:.3f}$",
+        zorder=5,
+    )
+
+    # Mark the two endpoints of the KS segment
+    ax.scatter(
+        [ks_location, ks_location],
+        [
+            data_cdf_at_loc,
+            mock_cdf_at_loc,
+        ],
+        color="black",
+        s=35,
+        zorder=6,
+    )
+
+    ax.set(
+        xlabel="F606W - F814W color",
+        ylabel="CDF",
+        title=(
+            f"{dwarf.name} CDF: "
+            "Satellite RGB vs. Mock Population"
+        ),
+    )
+
+    ax.text(
+        0.03,
+        0.95,
+        (
+            rf"$D_{{KS}}={D:.3f}$"
+            "\n"
+            rf"$p_{{KS}}={p:.3e}$"
+            "\n"
+            rf"$x_{{KS}}={ks_location:.3f}$"
+        ),
+        transform=ax.transAxes,
+        fontsize=12,
+        verticalalignment="top",
+        bbox={
+            "facecolor": "white",
+            "edgecolor": "0.5",
+            "alpha": 0.8,
+        },
+    )
+
     ax.legend()
     fig.tight_layout()
-    #plt.show()
 
-    return fig, ax, D, p
+    return (
+        fig,
+        ax,
+        D,
+        p,
+        ks_location,
+    )
 
 def kde_2d2(data_apt_clean, kind='kde', cmap='Blues'):
     '''

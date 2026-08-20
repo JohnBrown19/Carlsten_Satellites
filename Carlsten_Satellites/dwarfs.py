@@ -995,12 +995,15 @@ class Dwarf(object):
         print(f"Stars inside {factor} radius     = {self.N_target_stars}")
         print(f"Stars outside {factor} radius    = {self.N_background_stars}")
 
-    def filter_target_below_trgb(self, trgb_f814w_app, tolerance=0.2, f814_col="acs_f814w_vega"):
+    def filter_target_below_trgb(self, trgb_f814w_app, tolerance=0.5, f814_col="acs_f814w_vega"):
         """
         Filter stars inside the target aperture to keep only stars below/fainter
         than the TRGB in F814W.
 
         Requires self.target_star_df from self.count_stars_in_regions().
+
+        Old tolerance: 0.2
+        More realistic tolerance: 0.5
         """
 
         if not hasattr(self, "target_star_df"):
@@ -1018,7 +1021,7 @@ class Dwarf(object):
 
         return self.target_below_trgb_df
 
-    def filter_all_below_trgb(self, trgb_f814w_app, tolerance=0.2, f814_col="acs_f814w_vega"):
+    def filter_all_below_trgb(self, trgb_f814w_app, tolerance=0.5, f814_col="acs_f814w_vega"):
         """
         Filter all cleaned/masked stars to keep only stars fainter than/below
         the TRGB limit.
